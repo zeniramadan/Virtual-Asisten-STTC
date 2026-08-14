@@ -1,0 +1,49 @@
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Dependency directories
+node_modules/
+vendor/
+venv/
+.venv/
+
+# Build outputs
+dist/
+build/
+out/
+coverage/
+tmp/
+temp/
+
+# Cache
+.cache/
+.pytest_cache/
+.mypy_cache/
+.eslintcache
+
+# Vector Database
+chroma_db/
+
+# large files
+*.gguf
