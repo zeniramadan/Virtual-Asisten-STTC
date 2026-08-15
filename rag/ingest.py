@@ -1,5 +1,5 @@
 """
-rag_ingest.py
+ingest.py
 =============
 Script ini membaca semua file .docx di folder `documents/` (dokumen PMB & KRS),
 memecahnya jadi potongan-potongan teks (chunking) sambil MEMPERTAHANKAN konteks
@@ -55,7 +55,8 @@ from chromadb.config import Settings
 # ====== KONFIGURASI ======
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOCUMENTS_DIR = os.path.join(BASE_DIR, "..", "documents")
-CHROMA_DB_DIR = os.path.join(BASE_DIR, "chroma_db")
+# Tambahkan "database" di tengah path-nya
+CHROMA_DB_DIR = os.path.join(BASE_DIR, "database", "chroma_db") 
 COLLECTION_NAME = "minci_dokumen"
 EMBED_MODEL = "bge-m3"        # model embedding multilingual, jauh lebih akurat untuk
                                # Bahasa Indonesia dibanding nomic-embed-text (sebelumnya)

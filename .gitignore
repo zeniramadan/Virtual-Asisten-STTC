@@ -42,8 +42,12 @@ temp/
 .mypy_cache/
 .eslintcache
 
-# Vector Database
-chroma_db/
+# Database
+database/
 
 # large files
 *.gguf
+
+# Python cache
+__pycache__/
+*.pyc

@@ -5,18 +5,16 @@ Versi TESTING Minci via Telegram Bot API — dipakai untuk uji coba cepat tanpa 
 setup Cloudflare Tunnel / webhook publik, karena pakai LONG POLLING (bot yang aktif
 "nanya terus" ke server Telegram, bukan Telegram yang kirim ke kita).
 
-Token ditaruh LANGSUNG di file ini (tidak pakai .env) sesuai permintaan — cukup untuk
-testing. Untuk produksi nanti, sebaiknya tetap pindahkan ke .env supaya tidak ke-commit
-ke Git secara tidak sengaja.
+Token ditaruh di file .env untuk keamanan.
 
 Cara dapat token bot:
     1. Buka Telegram, chat ke @BotFather
     2. Ketik /newbot, ikuti instruksinya (kasih nama & username bot)
     3. BotFather akan kasih token seperti: 123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    4. Copy token itu, paste di TELEGRAM_TOKEN di bawah ini
+    4. Copy token itu, paste di TELEGRAM_TOKEN dalam file .env
 
 Cara jalankan:
-    pip install requests
+    pip install requests python-dotenv
     python telegram_bot.py
 
 Lalu buka chat ke bot kamu di Telegram dan mulai tanya-tanya.
@@ -27,21 +25,25 @@ import sys
 import time
 import logging
 import requests
+from dotenv import load_dotenv
 
-# Supaya bisa import ask_minci dari folder ../rag
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rag"))
-from rag_query import ask_minci  # noqa: E402
+# Load variabel dari file .env
+load_dotenv()
+
+# Supaya bisa import ask_minci dari folder rag
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "rag"))
+from query import ask_minci  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("minci-telegram")
 
-# ====== ISI TOKEN BOT KAMU DI SINI ======
-TELEGRAM_TOKEN = "8874887037:AAEYEh_lVL2_nMMOqU84fqVDW0JPfXoGKX4"
+# ====== AMBIL TOKEN BOT DARI .env ======
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 # ==========================================
 
-if TELEGRAM_TOKEN == "ISI_TOKEN_BOTFATHER_DISINI":
-    print("❌ TELEGRAM_TOKEN belum diisi!")
-    print("   Buka file ini, ganti nilai TELEGRAM_TOKEN dengan token dari @BotFather.")
+if not TELEGRAM_TOKEN:
+    print("❌ TELEGRAM_TOKEN belum diisi di file .env!")
+    print("   Buka file .env, tambahkan TELEGRAM_TOKEN=token_dari_BotFather")
     sys.exit(1)
 
 API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
@@ -112,7 +114,9 @@ def main():
                 send_typing_action(chat_id)
 
                 try:
-                    jawaban = ask_minci(text)
+                    # chat_id dipakai sebagai user_id, supaya riwayat obrolan tiap chat
+                    # Telegram tersimpan terpisah (Minci ingat konteks per orang)
+                    jawaban = ask_minci(text, user_id=str(chat_id))
                 except Exception as e:
                     logger.error(f"Error saat generate jawaban: {e}")
                     jawaban = (

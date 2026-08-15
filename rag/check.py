@@ -1,5 +1,5 @@
 """
-check_chroma.py
+check.py
 ================
 Script diagnostik: cek apakah ChromaDB benar-benar berisi chunk dari dokumen kamu,
 dan coba query manual buat lihat chunk apa yang kereturn untuk pertanyaan tertentu.
@@ -12,7 +12,8 @@ import os
 import chromadb
 import ollama
 
-CHROMA_DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
+# Sisipkan "database" di dalam os.path.join
+CHROMA_DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database", "chroma_db")
 COLLECTION_NAME = "minci_dokumen"
 EMBED_MODEL = "bge-m3"
 EMBED_QUERY_PREFIX = ""
