@@ -47,7 +47,7 @@ database/
 
 # large files
 *.gguf
-
+*.exe
 
 # Python cache
 __pycache__/
