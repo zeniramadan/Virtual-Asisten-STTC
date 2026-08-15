@@ -48,6 +48,7 @@ database/
 # large files
 *.gguf
 
+
 # Python cache
 __pycache__/
 *.pyc

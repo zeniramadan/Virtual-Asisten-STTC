@@ -17,7 +17,7 @@ Cloudflare Tunnel  ──►  Laptop kamu (localhost:8000)
                      FastAPI webhook (app.py)
                              │
                              ▼
-                     rag_query.py (RAG)
+                     query.py (RAG)
                        │            │
                        ▼            ▼
                   ChromaDB      Ollama (model "minci"
@@ -27,7 +27,7 @@ Cloudflare Tunnel  ──►  Laptop kamu (localhost:8000)
 
 - **Fakta** (jadwal, syarat, biaya, dsb) datang dari dokumen Word lewat RAG.
 - **Gaya bahasa** (santai-tapi-sopan ala gen-z) datang dari model yang sudah di-fine-tune LoRA.
-- Keduanya digabung di `rag_query.py`: konteks dari dokumen disuntikkan ke prompt, lalu dijawab pakai model bergaya Minci.
+- Keduanya digabung di `query.py`: konteks dari dokumen disuntikkan ke prompt, lalu dijawab pakai model bergaya Minci.
 
 ---
 
@@ -35,7 +35,7 @@ Cloudflare Tunnel  ──►  Laptop kamu (localhost:8000)
 
 ### 1.1 Siapkan/perluas dataset
 
-File `dataset/dataset_contoh.json` sudah berisi 20 contoh gaya bahasa Minci. Ini **cukup untuk mulai**, tapi makin banyak contoh (idealnya 50–150+) makin konsisten gayanya. Kamu tinggal tambah entri baru dengan format yang sama:
+File `dataset/dataset_training.json` sudah berisi 20 contoh gaya bahasa Minci. Ini **cukup untuk mulai**, tapi makin banyak contoh (idealnya 50–150+) makin konsisten gayanya. Kamu tinggal tambah entri baru dengan format yang sama:
 
 ```json
 {
@@ -52,7 +52,7 @@ Tidak perlu isi fakta PMB/KRS yang detail di sini — itu tugasnya RAG. Dataset 
 1. Buka [Google Colab](https://colab.research.google.com/), lalu upload file `colab/train_lora_colab.ipynb`.
 2. Runtime → Change runtime type → pilih **T4 GPU** → Save.
 3. Runtime → Run all.
-4. Saat diminta upload dataset, upload `dataset/dataset_contoh.json` (atau versi kamu yang sudah diperluas).
+4. Saat diminta upload dataset, upload `dataset/dataset_training.json` (atau versi kamu yang sudah diperluas).
 5. Tunggu proses training selesai (biasanya beberapa menit untuk dataset kecil).
 6. Di cell terakhir, file `.gguf` akan otomatis ter-download ke laptop kamu (cek folder Downloads).
 
@@ -73,15 +73,15 @@ ollama --version
 ### 2.2 Pull model embedding untuk RAG
 
 ```bash
-ollama pull nomic-embed-text
+ollama pull bge-m3
 ```
 
-Model ini ringan (~274MB), dipakai untuk mengubah teks jadi vektor saat pencarian dokumen.
+Model ini ringan (~1.2 GB), dipakai untuk mengubah teks jadi vektor saat pencarian dokumen.
 
 ### 2.3 Buat model "minci" dari hasil fine-tuning
 
 1. Pindahkan file `.gguf` hasil download dari Colab ke folder `ollama/` di project ini.
-2. Rename file tersebut jadi `minci-llama3.2-3b-q4_k_m.gguf` (atau edit baris `FROM` di `ollama/Modelfile` supaya sesuai nama file kamu).
+2. Rename file tersebut jadi `llama-3.2-3b-instruct.Q4_K_M.gguf` (atau edit baris `FROM` di `ollama/Modelfile` supaya sesuai nama file kamu).
 3. Masuk ke folder `ollama/` lalu jalankan:
 
 ```bash
@@ -115,13 +115,13 @@ pip install -r requirements.txt
 
 Masukkan semua file `.docx` PMB dan KRS ke folder `minci-project/documents/`.
 
-> 💡 Tips: kalau dokumen kamu masih format PDF/gambar, convert dulu ke `.docx`, atau kalau isinya tabel-tabel kompleks, cek dulu apakah tabelnya terbaca rapi (script `rag_ingest.py` sudah menghandle isi tabel, bukan cuma paragraf).
+> 💡 Tips: kalau dokumen kamu masih format PDF/gambar, convert dulu ke `.docx`, atau kalau isinya tabel-tabel kompleks, cek dulu apakah tabelnya terbaca rapi (script `ingest.py` sudah menghandle isi tabel, bukan cuma paragraf).
 
 ### 3.3 Jalankan ingestion
 
 ```bash
 cd minci-project/rag
-python rag_ingest.py
+python ingest.py
 ```
 
 Ini akan membaca semua `.docx`, memecahnya jadi potongan teks, dan menyimpannya sebagai vector database lokal di folder `rag/chroma_db/`.
@@ -131,7 +131,7 @@ Ini akan membaca semua `.docx`, memecahnya jadi potongan teks, dan menyimpannya 
 ### 3.4 Test RAG saja (tanpa WhatsApp dulu)
 
 ```bash
-python rag_query.py
+python query.py
 ```
 
 Coba tanya-tanya lewat terminal untuk memastikan jawabannya akurat berdasarkan dokumen sebelum lanjut ke integrasi WhatsApp.
