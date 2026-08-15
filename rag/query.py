@@ -13,7 +13,7 @@ python rag_query.py
 import os
 import ollama
 import chromadb
-from rag.conversation import get_history, add_message, reset_history
+from conversation import get_history, add_message, reset_history
 
 # ====== KONFIGURASI ======
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,7 +26,7 @@ CHAT_MODEL = "minci"          # nama model hasil `ollama create minci -f Modelfi
 TOP_K = 8                     # jumlah chunk paling relevan yang diambil (dinaikkan dari 4 -> 8
                                # karena skor similarity di dokumen ini rentangnya sempit/mirip-mirip,
                                # jadi butuh lebih banyak kandidat biar chunk yang benar ikut kebawa)
-DEBUG = True                  # set True biar konteks yang diambil ditampilkan di terminal
+DEBUG = False                  # set True biar konteks yang diambil ditampilkan di terminal
 
 # Riwayat percakapan (memori chat per user) ditangani di modul terpisah
 # conversation_store.py -- disimpan permanen di SQLite dengan auto-expire 1 jam.

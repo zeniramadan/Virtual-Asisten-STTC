@@ -19,7 +19,7 @@ from fastapi import FastAPI, Request, Response
 from dotenv import load_dotenv
 
 # Supaya bisa import ask_minci dari folder rag
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "rag"))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rag"))
 from query import ask_minci  # noqa: E402
 
 load_dotenv()

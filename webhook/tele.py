@@ -31,7 +31,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Supaya bisa import ask_minci dari folder rag
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "rag"))
+# Mundur satu folder (..) dari webhook, lalu masuk ke folder rag
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rag"))
 from query import ask_minci  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
