@@ -27,6 +27,7 @@ node_modules/
 vendor/
 venv/
 .venv/
+.claude/
 
 # Build outputs
 dist/

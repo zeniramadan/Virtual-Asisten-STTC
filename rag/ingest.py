@@ -1,5 +1,5 @@
 """
-ingest.py
+rag_ingest.py
 =============
 Script ini membaca semua file .docx di folder `documents/` (dokumen PMB & KRS),
 memecahnya jadi potongan-potongan teks (chunking) sambil MEMPERTAHANKAN konteks
@@ -55,8 +55,7 @@ from chromadb.config import Settings
 # ====== KONFIGURASI ======
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOCUMENTS_DIR = os.path.join(BASE_DIR, "..", "documents")
-# Tambahkan "database" di tengah path-nya
-CHROMA_DB_DIR = os.path.join(BASE_DIR, "database", "chroma_db") 
+CHROMA_DB_DIR = os.path.join(BASE_DIR, "database","chroma_db")
 COLLECTION_NAME = "minci_dokumen"
 EMBED_MODEL = "bge-m3"        # model embedding multilingual, jauh lebih akurat untuk
                                # Bahasa Indonesia dibanding nomic-embed-text (sebelumnya)
@@ -75,7 +74,7 @@ EMBED_DOC_PREFIX = ""
 # ============================================================
 
 # ============================================================
-# BAGIAN 0: Jembatani angka romawi <-> angka arab
+# BAGIAN 0: Jembatani angka romawi <-> angka numerik
 # (dokumen sering nulis "Gelombang I", tapi user nanya "gelombang 1" --
 #  tanpa ini, embedding kadang gagal mencocokkan keduanya)
 # ============================================================
@@ -94,26 +93,35 @@ ROMAN_TO_WORDS = {
 }
 
 _ROMAN_PATTERN = re.compile(
-    r"\b(Gelombang|Semester|Tahap|Angkatan)\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b"
-    r"(?!\s*/\s*\d)",  # skip kalau SUDAH ada format "/ <angka>" nyusul (hindari dobel anotasi)
+    r"\b(Gelombang|Semester|Tahap|Angkatan)\s+(I|II|III|IV|V|VI|VII|VIII|IX|X)\b",
     re.IGNORECASE,
 )
+# CATATAN: dulu ada "(?!\s*/\s*\d)" di akhir pola ini untuk skip teks yang SUDAH
+# ditulis manual dengan format "Semester I / 1 / satu" oleh penulis dokumen (biar
+# tidak dobel jadi "Semester I / 1 / satu / 1 / satu"). Sekarang karena fungsinya
+# GANTI (replace), bukan TEMPEL (append) lagi, filter itu dihapus -- justru sekarang
+# kita MAU tetap konversi "Semester I" -> "Semester 1" walau di belakangnya sudah
+# ada "/ 1 / satu" bikinan penulis, supaya SEMUA kemunculan angka romawi konsisten
+# terkonversi, tidak ada yang "kelewat".
 
 
 def annotate_roman_numerals(text: str) -> str:
     """
-    Ubah 'Gelombang I' jadi 'Gelombang I / 1 / satu' -- format ini sengaja disamakan
-    dengan gaya yang sudah dipakai sendiri di dokumen (lihat 'Semester I / 1 / satu'
-    di bagian rincian biaya), supaya query dengan angka arab ATAU kata (gelombang 1,
-    gelombang satu) tetap match dengan dokumen yang nulisnya pakai angka romawi.
+    Ganti angka romawi jadi angka numerik LANGSUNG (mis. "Gelombang III" -> "Gelombang 3"),
+    bukan cuma ditempel di sampingnya. Pendekatan lama (nempel "I / 1 / satu") ternyata
+    bikin pencarian ribet -- keyword "gelombang 3" tidak match persis dengan teks
+    "Gelombang III / 3 / tiga" kalau dicari sebagai frasa utuh. Dengan diganti LANGSUNG
+    jadi angka numerik, kata "gelombang 3" akan match langsung ke teks dokumen, dan model
+    juga otomatis tidak akan bingung mau nulis format apa saat menjawab (karena di
+    dokumen memang sudah cuma ada 1 bentuk angka, bukan 3 bentuk sekaligus).
     """
     def repl(match):
         word, roman = match.group(1), match.group(2)
         pair = ROMAN_TO_WORDS.get(roman.upper())
         if pair is None:
             return match.group(0)
-        arabic, kata = pair
-        return f"{word} {roman} / {arabic} / {kata}"
+        numerik, _kata = pair
+        return f"{word} {numerik}"
 
     return _ROMAN_PATTERN.sub(repl, text)
 
@@ -333,19 +341,31 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
     chunks = []
     current_lines = []
     current_length = 0
+    last_bagian = None
 
     for line in lines:
         line_length = len(line) + 1
+
+        if line.startswith("[Bagian:") or line.startswith("## "):
+            if current_lines:
+                chunks.append("\n".join(current_lines))
+                current_lines = []
+                current_length = 0
+            last_bagian = line if line.startswith("[Bagian:") else None
 
         if current_length + line_length > chunk_size and current_lines:
             chunks.append("\n".join(current_lines))
 
             overlap_lines = []
             overlap_length = 0
+            if last_bagian and last_bagian not in current_lines:
+                overlap_lines.append(last_bagian)
+                overlap_length = len(last_bagian) + 1
+
             for prev_line in reversed(current_lines):
                 if overlap_length + len(prev_line) > overlap:
                     break
-                overlap_lines.insert(0, prev_line)
+                overlap_lines.insert(0 if not last_bagian else 1, prev_line)
                 overlap_length += len(prev_line) + 1
 
             current_lines = overlap_lines

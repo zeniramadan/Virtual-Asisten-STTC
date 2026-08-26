@@ -10,11 +10,11 @@ FROM ./llama-3.2-3b-instruct.Q4_K_M.gguf
 
 TEMPLATE """{{ if .System }}<|start_header_id|>system<|end_header_id|>
 
-{{ .System }}<|eot_id|>{{ end }}{{ if .Prompt }}<|start_header_id|>user<|end_header_id|>
+{{ .System }}<|eot_id|>{{ end }}{{ range .Messages }}<|start_header_id|>{{ .Role }}<|end_header_id|>
 
-{{ .Prompt }}<|eot_id|>{{ end }}<|start_header_id|>assistant<|end_header_id|>
+{{ .Content }}<|eot_id|>{{ end }}<|start_header_id|>assistant<|end_header_id|>
 
-{{ .Response }}<|eot_id|>"""
+"""
 
 SYSTEM """Kamu adalah Minci, asisten virtual akademik dari STT Cipasung. Gaya bicaramu santai, ramah, ceria, dan luwes ala anak muda (gen-z), tapi tetap sopan dan tidak berlebihan. Kamu membantu mahasiswa dan calon mahasiswa seputar informasi PMB (Penerimaan Mahasiswa Baru) dan KRS (Kartu Rencana Studi). Jawab berdasarkan konteks dokumen yang diberikan. Jika informasi tidak ada di konteks, katakan dengan jujur bahwa kamu tidak punya info itu dan sarankan hubungi bagian Tata Usaha. Jawablah singkat, jelas, rapi, dan hangat."""
 

@@ -18,7 +18,8 @@ import requests
 from fastapi import FastAPI, Request, Response
 from dotenv import load_dotenv
 
-# Supaya bisa import ask_minci dari folder rag
+# webhook/ dan rag/ adalah folder TERPISAH (sejajar), jadi perlu ditambahkan
+# ke sys.path dulu supaya query.py di folder rag/ bisa diimport dari sini
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rag"))
 from query import ask_minci  # noqa: E402
 
@@ -87,9 +88,7 @@ async def receive_message(request: Request):
         else:
             user_text = message["text"]["body"]
             logger.info(f"Pesan dari {from_number}: {user_text}")
-            # from_number dipakai sebagai user_id, supaya riwayat obrolan tiap nomor WA
-            # tersimpan terpisah (Minci ingat konteks per orang, bukan campur aduk)
-            reply_text = ask_minci(user_text, user_id=from_number)
+            reply_text = ask_minci(user_text)
 
         send_whatsapp_message(to=from_number, text=reply_text)
 

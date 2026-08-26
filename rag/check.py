@@ -53,12 +53,12 @@ for source, count in source_counts.items():
     print(f"   - {source}: {count} chunk")
 print()
 
-# Tampilkan beberapa contoh chunk yang tersimpan
-print("📄 Contoh 3 chunk pertama yang tersimpan:")
-sample = collection.peek(limit=3)
-for i, (doc, meta) in enumerate(zip(sample["documents"], sample["metadatas"])):
-    print(f"\n--- Chunk {i+1} (sumber: {meta.get('source')}) ---")
-    print(doc[:300], "..." if len(doc) > 300 else "")
+# Tampilkan semua chunk yang tersimpan
+print("📄 Semua chunk yang tersimpan:")
+all_chunks = collection.get(include=["documents", "metadatas"])
+for i, (doc, meta) in enumerate(zip(all_chunks["documents"], all_chunks["metadatas"]), start=1):
+    print(f"\n--- Chunk {i} (sumber: {meta.get('source')}) ---")
+    print(doc)
 
 # Coba query manual
 print("\n\n🔍 Test query manual")

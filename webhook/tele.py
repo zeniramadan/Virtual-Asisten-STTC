@@ -30,8 +30,8 @@ from dotenv import load_dotenv
 # Load variabel dari file .env
 load_dotenv()
 
-# Supaya bisa import ask_minci dari folder rag
-# Mundur satu folder (..) dari webhook, lalu masuk ke folder rag
+# webhook/ dan rag/ adalah folder TERPISAH (sejajar), jadi perlu ditambahkan
+# ke sys.path dulu supaya query.py di folder rag/ bisa diimport dari sini
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rag"))
 from query import ask_minci  # noqa: E402
 
@@ -115,9 +115,7 @@ def main():
                 send_typing_action(chat_id)
 
                 try:
-                    # chat_id dipakai sebagai user_id, supaya riwayat obrolan tiap chat
-                    # Telegram tersimpan terpisah (Minci ingat konteks per orang)
-                    jawaban = ask_minci(text, user_id=str(chat_id))
+                    jawaban = ask_minci(text)
                 except Exception as e:
                     logger.error(f"Error saat generate jawaban: {e}")
                     jawaban = (
