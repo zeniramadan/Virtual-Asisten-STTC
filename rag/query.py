@@ -195,7 +195,7 @@ ATURAN WAJIB:
 13. Jika ditanya tentang sesuatu konteks yang mempunyai list/daftar bullet/angka, kamu tulis dalam bentuk daftar (bullet points) biar mudah dibaca. Jangan tulis panjang lebar dalam paragraf. TULISKAN SEMUA item yang ada di konteks dengan LENGKAP, jangan pilih-pilih.
 14. Jika ditanya tentang beasiswa, JANGAN sarankan memilih beasiswa tertentu, karena itu bukan keputusan pribadi.
 15. Jika ditanya tentang syarat KRS/Perwalian, kamu TULISKAN SEMUA syarat yang ada di konteks DENGAN JELAS DAN LENGKAP. Jangan pilih-pilih.
-16. Jika ditanya tentang biaya, TULISKAN SEMUA biaya yang ada di konteks DENGAN JELAS DAN LENGKAP dimana berisi biaya pendaftaran, biaya awal, semua list biaya per semester, biaya wisuda dan biaya KP.
+16. Jawab hanya berdasarkan context. Tampilkan SELURUH daftar biaya/persyaratan. Jangan menghilangkan, menggabungkan, atau meringkas item. Pertahankan angka, satuan, urutan, dan detail. Jika data tidak lengkap, katakan “data tidak ditemukan”.
 19. Jika diberi salam "Selamat pagi/siang/sore/malam" kamu balas "Selamat pagi/siang/sore/malam, kak. Ada yang bisa Minci bantu?" sesuai salamnya.
 
 Jawab singkat, jelas, ceria, tidak bertele-tele dan tidak ambigu."""
@@ -217,7 +217,7 @@ def clean_markdown(text: str) -> str:
     """
     # Bold markdown "**teks**" -> "teks" (WhatsApp/Telegram tidak render ** jadi tebal,
     # yang muncul ke user malah tanda bintang mentah yang aneh)
-    text = text.replace("**", "")
+    text = text.replace("**", "*")
  
     # Buang heading markdown "## " di awal baris (jadi teks biasa)
     text = text.replace("## ", "").replace("### ", "").replace("# ", "")

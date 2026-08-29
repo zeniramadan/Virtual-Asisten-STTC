@@ -13,9 +13,10 @@ Lalu expose ke internet pakai Cloudflare Tunnel (lihat SETUP_GUIDE.md):
 
 import os
 import sys
+import time
 import logging
 import requests
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, BackgroundTasks
 from dotenv import load_dotenv
 
 # webhook/ dan rag/ adalah folder TERPISAH (sejajar), jadi perlu ditambahkan
@@ -39,6 +40,38 @@ WA_API_VERSION = os.getenv("WA_API_VERSION", "v20.0")
 
 WA_SEND_URL = f"https://graph.facebook.com/{WA_API_VERSION}/{WA_PHONE_NUMBER_ID}/messages"
 
+# ============================================================
+# DEDUPLIKASI PESAN: cegah jawaban dobel kalau Meta retry webhook
+# ============================================================
+# WhatsApp Cloud API akan RETRY (kirim ulang) notifikasi webhook kalau server kita
+# tidak segera balas 200 OK (biasanya timeout beberapa detik). Karena proses RAG
+# (embedding + cari dokumen + generate jawaban LLM) bisa makan waktu 10-20+ detik
+# di model 3B CPU, Meta seringkali sudah keburu retry SEBELUM kita selesai proses
+# -- akibatnya pesan yang SAMA diproses berkali-kali, jawaban dikirim berkali-kali.
+#
+# Solusinya DUA LAPIS:
+# 1. Balas 200 OK ke Meta SECEPATNYA (sebelum proses RAG), proses beneran jalan
+#    di BACKGROUND (lihat BackgroundTasks di bawah) -- ini FIX UTAMA.
+# 2. Simpan ID pesan yang sudah diproses, supaya walau Meta TETAP retry (datang
+#    lagi notifikasi untuk pesan yang sama), kita skip -- tidak diproses ulang.
+#    Ini jaring pengaman KEDUA, bukan solusi utama.
+_processed_message_ids: dict[str, float] = {}
+DEDUP_WINDOW_SECONDS = 300  # anggap ID pesan "sudah pernah diproses" selama 5 menit
+
+
+def _is_duplicate(message_id: str) -> bool:
+    now = time.time()
+    # Beres-beres ID lama supaya dict tidak membengkak tanpa batas
+    expired = [mid for mid, ts in _processed_message_ids.items() if now - ts > DEDUP_WINDOW_SECONDS]
+    for mid in expired:
+        del _processed_message_ids[mid]
+
+    if message_id in _processed_message_ids:
+        return True
+
+    _processed_message_ids[message_id] = now
+    return False
+
 
 @app.get("/webhook")
 async def verify_webhook(request: Request):
@@ -60,9 +93,14 @@ async def verify_webhook(request: Request):
 
 
 @app.post("/webhook")
-async def receive_message(request: Request):
+async def receive_message(request: Request, background_tasks: BackgroundTasks):
     """
     Endpoint yang menerima notifikasi pesan masuk dari WhatsApp.
+
+    PENTING: endpoint ini WAJIB balas cepat (200 OK) -- proses RAG yang lambat
+    (embedding, cari dokumen, generate jawaban LLM) dilakukan di BACKGROUND
+    lewat BackgroundTasks, BUKAN sebelum return. Ini mencegah Meta menganggap
+    webhook "gagal" dan melakukan retry, yang tadinya menyebabkan jawaban dobel.
     """
     body = await request.json()
     logger.info(f"Payload masuk: {body}")
@@ -77,25 +115,49 @@ async def receive_message(request: Request):
             return {"status": "ok"}
 
         message = value["messages"][0]
+        message_id = message.get("id")
         from_number = message["from"]  # nomor WA pengirim
         msg_type = message.get("type")
+
+        # Cek duplikasi SEBELUM diproses -- kalau ID ini sudah pernah masuk
+        # (Meta retry), skip total, jangan proses/balas lagi.
+        if message_id and _is_duplicate(message_id):
+            logger.info(f"Pesan {message_id} dari {from_number} adalah DUPLIKAT (retry Meta), di-skip.")
+            return {"status": "ok"}
 
         if msg_type != "text":
             reply_text = (
                 "Maaf kak, Minci saat ini baru bisa balas pesan teks ya 🙏 "
                 "Coba tulis pertanyaannya dalam bentuk teks ya."
             )
+            background_tasks.add_task(send_whatsapp_message, from_number, reply_text)
         else:
             user_text = message["text"]["body"]
             logger.info(f"Pesan dari {from_number}: {user_text}")
-            reply_text = ask_minci(user_text)
-
-        send_whatsapp_message(to=from_number, text=reply_text)
+            # Proses RAG (lambat) + kirim balasan dijadwalkan di BACKGROUND,
+            # supaya endpoint ini bisa langsung return 200 OK ke Meta tanpa nunggu.
+            background_tasks.add_task(process_and_reply, from_number, user_text)
 
     except (KeyError, IndexError) as e:
         logger.error(f"Format payload tidak dikenali: {e}")
 
     return {"status": "ok"}
+
+
+def process_and_reply(from_number: str, user_text: str):
+    """
+    Fungsi yang jalan di BACKGROUND (setelah endpoint sudah balas 200 OK ke Meta).
+    Di sinilah proses RAG yang lambat (ask_minci) benar-benar dijalankan.
+    """
+    try:
+        reply_text = ask_minci(user_text)
+        send_whatsapp_message(to=from_number, text=reply_text)
+    except Exception as e:
+        logger.error(f"Gagal memproses/membalas pesan dari {from_number}: {e}")
+        send_whatsapp_message(
+            to=from_number,
+            text="Waduh, ada gangguan teknis nih kak 🙏 Coba tanya lagi sebentar ya.",
+        )
 
 
 def send_whatsapp_message(to: str, text: str):
