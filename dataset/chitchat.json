@@ -1,0 +1,30 @@
+{
+  "greeting": [
+    "halo", "hallo", "hai", "hei", "hy", "hey", "helo",
+    "assalamualaikum", "assalamu'alaikum", "waalaikumsalam",
+    "selamat pagi", "selamat siang", "selamat sore", "selamat malam",
+    "pagi", "siang", "sore", "malam",
+    "met pagi", "met siang", "met sore", "met malam",
+    "permisi", "misi", "min", "kak"
+  ],
+  "smalltalk": [
+    "apa kabar", "gimana kabar", "kabar baik", "kabarnya gimana",
+    "lagi apa", "lagi ngapain",
+    "kamu siapa", "siapa kamu", "km siapa",
+    "kamu bot ya", "kamu ai ya", "kamu robot ya", "kamu manusia",
+    "siapa yang bikin kamu", "siapa yg bikin kamu", "siapa yang buat kamu"
+  ],
+  "thanks": [
+    "makasih", "terima kasih", "trims", "thanks", "thank you", "thx",
+    "tengkyu", "makasih banyak", "makasih ya", "makasih kak"
+  ],
+  "farewell": [
+    "dadah", "bye", "sampai jumpa", "daa",
+    "udah dulu ya", "segitu aja", "segitu dulu"
+  ],
+  "affirmation": [
+    "oke", "ok", "okay", "sip", "siap", "baik",
+    "noted", "mantap", "oke deh", "yaudah", "yauda", "gapapa", "gpp",
+    "wkwk", "wkwkwk", "haha", "hehe"
+  ]
+}
