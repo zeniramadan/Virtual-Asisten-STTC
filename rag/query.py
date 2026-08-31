@@ -81,9 +81,9 @@ CHITCHAT_PATH = os.path.join(BASE_DIR, "..", "dataset", "chitchat.json")
 EMBED_MODEL = "bge-m3"
 EMBED_QUERY_PREFIX = ""       # bge-m3 tidak butuh prefix instruksi khusus
 
-CHAT_MODEL = "minci"
+CHAT_MODEL = "llama3.2"
 
-TOP_K = 8                     # jumlah kandidat chunk yang diambil dari ChromaDB
+TOP_K = 10                     # jumlah kandidat chunk yang diambil dari ChromaDB
 DEBUG = True                  # tampilkan proses retrieval & routing di terminal
 
 MAX_RELEVANT_DISTANCE = 0.62  # ambang distance (cosine) -- di atas ini dianggap
