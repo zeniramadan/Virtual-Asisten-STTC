@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 rag_ingest.py
 =============
@@ -252,61 +254,79 @@ def iter_block_items(document):
             yield Table(child, document)
 
 
-def read_docx_text(filepath: str) -> str:
-    """Baca seluruh isi .docx (paragraf + tabel) sambil menyisipkan konteks heading/sub-heading."""
+def read_docx_text(filepath: str) -> list[list[tuple[str, bool]]]:
+    """
+    Baca isi .docx dan kelompokkan per section agar konteks tidak gampang terpecah.
+
+    Tiap baris disimpan sebagai tuple (teks, is_atomic):
+    - is_atomic=True  -> KHUSUS baris tabel (mis. satu baris kalender/biaya/mata
+      kuliah). Baris ini WAJIB jadi satu chunk sendiri di chunk_text(), TIDAK
+      boleh digabung dengan baris tabel lain, apa pun CHUNK_SIZE-nya.
+      Alasan: satu baris tabel = satu fakta atomik & independen (mis. "Herregistrasi
+      dan Perwalian: 31 Agustus - 12 September 2026"). Kalau beberapa baris beda
+      topik digabung jadi satu chunk (yang dulu terjadi karena baris tabel ini
+      cuma dianggap teks biasa lalu digabung berdasar CHUNK_SIZE), embedding-nya
+      jadi "encer" -- makna baris yang dicari user bisa kalah oleh baris tetangga
+      yang topiknya beda tapi kebetulan kata-katanya lebih sering muncul di
+      dokumen (mis. kata "Registrasi" yang muncul di 3 baris gelombang PMB
+      berbeda bikin klaster embedding "registrasi ... tanggal" lebih kuat
+      daripada baris "Herregistrasi dan Perwalian" yang cuma muncul sekali,
+      walau baris itu justru yang paling relevan secara harfiah).
+    - is_atomic=False -> teks biasa (heading, sub-heading, paragraf, bullet),
+      tetap digabung berdasar CHUNK_SIZE seperti sebelumnya.
+    """
     document = docx.Document(filepath)
-    full_text = []
+    sections = []
+    current_section = []
 
     current_h1 = None
     current_h2 = None
-    list_stack = {}  # ilvl -> teks bullet terakhir di level itu (fallback nested bullet non-bold)
-
-    # Konteks terakhir yang SUDAH ditulis sebagai baris "[Konteks: ...]". Dipakai supaya
-    # tidak nulis ulang konteks yang SAMA PERSIS berkali-kali di baris-baris berurutan --
-    # ini penting karena embedding model (nomic-embed-text) jadi kurang bisa membedakan
-    # antar section kalau tiap chunk isinya didominasi teks konteks yang berulang-ulang,
-    # bukan konten sebenarnya. Header konteks cukup ditulis SEKALI tiap kali dia berubah.
+    list_stack = {}
     last_written_context = None
+
+    def flush_section():
+        nonlocal current_section
+        if current_section:
+            sections.append(current_section)
+            current_section = []
 
     for block in iter_block_items(document):
 
-        # ---- Blok berupa TABEL ----
         if isinstance(block, Table):
             ctx_parts = [c for c in [current_h1, current_h2] if c]
             ctx_prefix = " >> ".join(ctx_parts)
             for row_text in read_table_rows(block, context_prefix=ctx_prefix):
-                full_text.append(row_text)
+                current_section.append((row_text, True))
             continue
 
-        # ---- Blok berupa PARAGRAF ----
         para = block
         text = para.text.strip()
         if not text:
             continue
 
         text = annotate_roman_numerals(text)
-
         kind = classify_paragraph(para, text)
 
         if kind == "h1":
+            flush_section()
             current_h1 = text
             current_h2 = None
             list_stack = {}
             last_written_context = None
-            full_text.append(f"\n## {text}")
+            current_section.append((f"\n## {text}", False))
             continue
 
         if kind == "h2":
+            flush_section()
             current_h2 = text
             list_stack = {}
             last_written_context = None
             if current_h1:
-                full_text.append(f"[Bagian: {current_h1}] {text}")
+                current_section.append((f"[Bagian: {current_h1}] {text}", False))
             else:
-                full_text.append(text)
+                current_section.append((text, False))
             continue
 
-        # ---- kind == "content" ----
         ctx_parts = [c for c in [current_h1, current_h2] if c]
 
         level = get_list_level(para)
@@ -321,61 +341,74 @@ def read_docx_text(filepath: str) -> str:
         if ctx_parts:
             ctx_str = " >> ".join(ctx_parts)
             if ctx_str != last_written_context:
-                # Konteks berubah (baru masuk section/bullet lain) -> tulis header-nya SEKALI
-                full_text.append(f"[Konteks: {ctx_str}]")
+                current_section.append((f"[Konteks: {ctx_str}]", False))
                 last_written_context = ctx_str
-            full_text.append(f"- {text}")
+            current_section.append((f"- {text}", False))
         else:
-            full_text.append(text)
+            current_section.append((text, False))
 
-    return "\n".join(full_text)
+    flush_section()
+    return sections
 
 
 # ============================================================
-# BAGIAN 4: Chunking berbasis baris (tidak potong di tengah kalimat)
+# BAGIAN 4: Chunking per section
 # ============================================================
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP):
-    lines = [line for line in text.split("\n") if line.strip()]
-
+def chunk_text(sections: list[list[tuple[str, bool]]], chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP):
     chunks = []
-    current_lines = []
-    current_length = 0
-    last_bagian = None
 
-    for line in lines:
-        line_length = len(line) + 1
+    for section_lines in sections:
+        lines = [item for item in section_lines if item[0].strip()]
+        if not lines:
+            continue
 
-        if line.startswith("[Bagian:") or line.startswith("## "):
-            if current_lines:
+        current_lines = []
+        current_length = 0
+
+        for line, is_atomic in lines:
+
+            # ----------------------------------------------------
+            # BARIS TABEL (is_atomic=True): selalu jadi chunk sendiri.
+            # Flush dulu apa pun yang lagi terkumpul di buffer (teks
+            # biasa non-tabel), lalu baris ini langsung ditambahkan
+            # sebagai chunk MANDIRI -- tidak digabung dengan baris
+            # tabel lain maupun teks di sekitarnya, supaya embedding-nya
+            # presisi ke satu fakta ini saja. Lihat catatan di
+            # read_docx_text() soal kenapa ini penting.
+            # ----------------------------------------------------
+            if is_atomic:
+                if current_lines:
+                    chunks.append("\n".join(current_lines))
+                    current_lines = []
+                    current_length = 0
+
+                chunks.append(line)
+                continue
+
+            line_length = len(line) + 1
+
+            if current_lines and current_length + line_length > chunk_size:
                 chunks.append("\n".join(current_lines))
-                current_lines = []
-                current_length = 0
-            last_bagian = line if line.startswith("[Bagian:") else None
 
-        if current_length + line_length > chunk_size and current_lines:
+                overlap_lines = []
+                overlap_length = 0
+
+                for prev_line in reversed(current_lines):
+                    prev_len = len(prev_line) + 1
+                    if overlap_length + prev_len > overlap:
+                        break
+                    overlap_lines.insert(0, prev_line)
+                    overlap_length += prev_len
+
+                current_lines = overlap_lines
+                current_length = overlap_length
+
+            current_lines.append(line)
+            current_length += line_length
+
+        if current_lines:
             chunks.append("\n".join(current_lines))
-
-            overlap_lines = []
-            overlap_length = 0
-            if last_bagian and last_bagian not in current_lines:
-                overlap_lines.append(last_bagian)
-                overlap_length = len(last_bagian) + 1
-
-            for prev_line in reversed(current_lines):
-                if overlap_length + len(prev_line) > overlap:
-                    break
-                overlap_lines.insert(0 if not last_bagian else 1, prev_line)
-                overlap_length += len(prev_line) + 1
-
-            current_lines = overlap_lines
-            current_length = overlap_length
-
-        current_lines.append(line)
-        current_length += line_length
-
-    if current_lines:
-        chunks.append("\n".join(current_lines))
 
     return chunks
 
@@ -429,14 +462,15 @@ def main():
         filename = os.path.basename(filepath)
         print(f"\n🔄 Memproses: {filename}")
 
-        raw_text = read_docx_text(filepath)
+        sections = read_docx_text(filepath)
 
-        if not raw_text.strip():
+        if not sections:
             print(f"   ⚠️  PERINGATAN: tidak ada teks terbaca dari {filename}!")
             continue
 
-        chunks = chunk_text(raw_text)
-        print(f"   -> {len(raw_text)} karakter teks terbaca, {len(chunks)} chunk dihasilkan")
+        chunks = chunk_text(sections)
+        total_chars = sum(len(text) for section in sections for text, _ in section)
+        print(f"   -> {total_chars} karakter teks terbaca, {len(chunks)} chunk dihasilkan")
 
         for i, chunk in enumerate(chunks):
             embedding = get_embedding(chunk)
