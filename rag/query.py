@@ -111,6 +111,7 @@ SOURCE_DOMINANCE_MARGIN = 0.05  # chunk dari dokumen LAIN (beda dari dokumen top
 PREFERRED_SOURCE_KEYWORDS: list[tuple[list[str], str]] = [
     (["jadwal", "tanggal", "kalender", "kapan", "gelombang"], "KALENDER.docx"),
     (["biaya", "bayar", "nominal", "harga", "ukt", "pembayaran", "cicil"], "BIAYA.docx"),
+    (["program studi", "prodi", "jurusan", "program studi apa", "ada prodi"], "PMB.docx"),
 ]
 
 # ============================================================
@@ -262,6 +263,60 @@ def _detect_preferred_source(question: str) -> str | None:
     return None
 
 
+_CALENDAR_EVENT_RULES: list[tuple[str, list[str]]] = [
+    ("pra ktmb", ["pra ktmb"]),
+    ("ktmb", ["ktmb"]),
+    ("perwalian", ["perwalian", "herregistrasi dan perwalian", "perwalian / krs", "herregistrasi dan perwalian / krs"]),
+    ("herregistrasi", ["herregistrasi", "herregistrasi dan perwalian", "herregistrasi dan perwalian / krs"]),
+    ("kprs", ["kprs", "kartu perubahan rencana studi", "kartu perubahan rencana studi / cuti kuliah"]),
+    ("cuti kuliah", ["cuti kuliah", "kartu perubahan rencana studi", "kartu perubahan rencana studi / cuti kuliah"]),
+    ("uas", ["uas"]),
+    ("uts", ["uts"]),
+]
+
+
+def _normalize_calendar_question(question: str) -> str:
+    """Normalisasi deskriptif agar matching event jadi lebih konsisten."""
+    q = question.lower().strip()
+    q = re.sub(r"\b(kapan|jadwal|tanggal|kegiatan|saat|ketika|berapa)\b", " ", q)
+    q = re.sub(r"[^a-z0-9\s/\-]", " ", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    return q
+
+
+def _extract_exact_event_terms(question: str) -> list[str]:
+    """Ambil kata kunci event spesifik untuk membatasi hasil dari KALENDER.docx."""
+    q = _normalize_calendar_question(question)
+
+    for phrase, terms in _CALENDAR_EVENT_RULES:
+        if phrase in q:
+            return terms
+
+    if "gelombang" in q:
+        q = re.sub(r"\bgelombang\s+ke[- ]?\s*(\d|satu|dua|tiga|i|ii|iii)\b", r"gelombang \1", q, flags=re.IGNORECASE)
+        q = re.sub(r"\bgelombang\s+(?:ke[- ]?)?\s*(\d|satu|dua|tiga|i|ii|iii)\b", r"gelombang \1", q, flags=re.IGNORECASE)
+        terms = []
+        if "gelombang 1" in q or "gelombang satu" in q or "gelombang i" in q:
+            terms += ["gelombang 1", "gelombang satu"]
+        if "gelombang 2" in q or "gelombang dua" in q or "gelombang ii" in q:
+            terms += ["gelombang 2", "gelombang dua"]
+        if "gelombang 3" in q or "gelombang tiga" in q or "gelombang iii" in q:
+            terms += ["gelombang 3", "gelombang tiga"]
+        return terms
+    return []
+
+
+def _get_event_match_label(question: str) -> str | None:
+    """Balik label event paling dekat dengan pertanyaan agar instruksi prompt bisa ditulis secara generik."""
+    q = _normalize_calendar_question(question)
+    for phrase, _terms in _CALENDAR_EVENT_RULES:
+        if phrase in q:
+            return phrase
+    if "gelombang" in q:
+        return "gelombang"
+    return None
+
+
 def retrieve_context(question: str, top_k: int = TOP_K) -> str:
     """Cari potongan dokumen paling relevan dengan pertanyaan user, sudah difilter."""
     query_embedding = ollama.embeddings(
@@ -306,6 +361,7 @@ def retrieve_context(question: str, top_k: int = TOP_K) -> str:
         print(f"    Dokumen topik utama: {top_source}  ({routing_note})")
         print("=" * 70)
 
+    exact_event_terms = _extract_exact_event_terms(question)
     context_blocks = []
     for doc, meta, dist in zip(documents, metadatas, distances):
         source = meta.get("source", "dokumen")
@@ -327,6 +383,12 @@ def retrieve_context(question: str, top_k: int = TOP_K) -> str:
             elif dist > best_distance + SOURCE_DOMINANCE_MARGIN:
                 dipakai = False
                 alasan = f"❌ DIBUANG (dokumen '{source}' beda dari topik utama '{top_source}')"
+
+        if exact_event_terms and source == top_source:
+            doc_lower = doc.lower()
+            if not any(term in doc_lower for term in exact_event_terms):
+                dipakai = False
+                alasan = f"❌ DIBUANG (event spesifik tidak cocok: {exact_event_terms})"
 
         if DEBUG:
             print(f"(distance={dist:.4f}, sumber={source}) {alasan}")
@@ -430,11 +492,44 @@ def extract_items_from_source(context: str, source: str | None) -> list[str]:
     return items
 
 
+def _is_program_study_question(question: str) -> bool:
+    """Cek apakah pertanyaan menanyakan daftar program studi / jurusan kampus."""
+    q_lower = question.lower()
+    return any(kw in q_lower for kw in ["program studi", "prodi", "jurusan", "ada prodi", "ada jurusan", "program studi apa"])
+
+
 def filter_items_for_question(items: list[str], question: str) -> list[str]:
-    """Batasi item sesuai gelombang yang ditanya, dan bila ada kegiatan spesifik, pilih item yang sesuai kegiatan itu saja."""
-    q = question.lower().strip()
+    """Batasi item sesuai event/topik yang ditanya, menggunakan aturan event yang sudah dipusatkan."""
+    q = _normalize_calendar_question(question)
+
+    if _is_program_study_question(question):
+        filtered = [item for item in items if re.search(r"\bS1\b", item, flags=re.IGNORECASE)]
+        if filtered:
+            return filtered
+
+    exact_event_terms = _extract_exact_event_terms(question)
+    if exact_event_terms:
+        filtered = [item for item in items if any(term in item.lower() for term in exact_event_terms)]
+        if filtered:
+            return filtered
+
+    topic_keywords = {
+        "perwalian": ["perwalian", "perwalian online", "herregistrasi dan perwalian", "herregistrasi"],
+        "krs": ["kartu rencana studi", "krs", "pengisian krs"],
+        "herregistrasi": ["herregistrasi", "herregistrasi dan perwalian"],
+    }
+
+    for topic, keywords in topic_keywords.items():
+        if any(kw in q for kw in keywords):
+            filtered = [item for item in items if any(kw in item.lower() for kw in keywords)]
+            if filtered:
+                return filtered
+
     if "gelombang" not in q:
         return items
+
+    q = re.sub(r"\bgelombang\s+ke[- ]?\s*(\d|satu|dua|tiga|i|ii|iii)\b", r"gelombang \1", q, flags=re.IGNORECASE)
+    q = re.sub(r"\bgelombang\s+(?:ke[- ]?)?\s*(\d|satu|dua|tiga|i|ii|iii)\b", r"gelombang \1", q, flags=re.IGNORECASE)
 
     number_targets = []
     if "gelombang 1" in q or "gelombang satu" in q or "gelombang i" in q:
@@ -481,10 +576,20 @@ def filter_items_for_question(items: list[str], question: str) -> list[str]:
     return activity_filtered if activity_filtered else filtered
 
 
+def _is_procedure_question(question: str) -> bool:
+    """Hanya anggap pertanyaan sebagai prosedur KRS bila ada kata kerja prosedural eksplisit."""
+    q_lower = question.lower()
+    if any(kw in q_lower for kw in ["tata cara", "cara pengisian", "langkah", "prosedur", "pengisian krs", "perwalian online"]):
+        return True
+    if "krs" in q_lower and any(kw in q_lower for kw in ["cara", "tata cara", "langkah", "prosedur", "pengisian"]):
+        return True
+    return False
+
+
 def extract_relevant_procedure_context(context: str, question: str) -> str:
     """Ambil blok prosedur yang paling relevan untuk pertanyaan tata cara/langkah KRS."""
     q_lower = question.lower()
-    if not any(kw in q_lower for kw in ["tata cara", "cara", "langkah", "prosedur", "pengisian", "krs", "perwalian"]):
+    if not _is_procedure_question(question):
         return ""
 
     blocks = context.split("\n\n---\n\n")
@@ -513,12 +618,13 @@ def find_highlighted_lines(question: str, context: str) -> str:
     keyword_groups = [
         ("pengumuman hasil seleksi", ["pengumuman"]),
         ("jadwal/tanggal kegiatan", ["jadwal", "tanggal", "kalender", "kapan"]),
+        ("pra ktmb", ["pra ktmb", "ktmb"]),
         ("seleksi/tes", ["seleksi", "tes", "ujian"]),
         ("pendaftaran PMB", ["pendaftaran", "buka", "dibuka", "penerimaan", "gelombang", "syarat", "persyaratan", "administrasi"]),
         ("syarat pendaftaran", ["syarat", "persyaratan", "dokumen", "berkas"]),
         ("jurusan/prodi", ["jurusan", "prodi", "program studi"]),
         ("biaya/pembayaran", ["biaya", "pembayaran", "bayar", "ukt", "nominal"]),
-        ("tata cara/prosedur KRS", ["tata cara", "cara pengisian", "pengisian krs", "langkah", "prosedur", "perwalian online", "krs", "perwalian"]),
+        ("tata cara/prosedur KRS", ["tata cara", "cara pengisian", "pengisian krs", "langkah", "prosedur", "perwalian online"]),
     ]
 
     matched_label, matched_keywords = None, None
@@ -573,13 +679,33 @@ Pertanyaan:
 {question}"""
 
     q_lower = question.lower()
+    event_label = _get_event_match_label(question)
+    event_terms = _extract_exact_event_terms(question)
+
+    if _is_program_study_question(question):
+        msg += "\n\nINSTRUKSI WAJIB: Ini pertanyaan menanyakan daftar program studi / jurusan yang ada. HANYA tampilkan nama program studi yang tersedia, seperti 'S1 Teknik Industri' dan 'S1 Informatika'. JANGAN tampilkan deskripsi prodi, prospek kerja, UKM, beasiswa, atau detail lain yang bukan daftar nama program studi."
+        return msg
+
+    if event_label:
+        if event_label == "gelombang":
+            target_detail = "gelombang yang dimaksud"
+        else:
+            target_detail = f"'{event_label}'"
+
+        constraint = "HANYA tampilkan item yang sesuai event ini dan JANGAN campur item kegiatan lain."
+        if event_terms:
+            constraint = f"HANYA tampilkan item yang mengandung salah satu kata kunci berikut: {', '.join(event_terms[:4])}. JANGAN campur item kegiatan lain."
+
+        msg += f"\n\nINSTRUKSI WAJIB: Pertanyaan ini spesifik untuk {target_detail}. {constraint}"
+        return msg
+
     if any(kw in q_lower for kw in ["syarat", "persyaratan", "pendaftaran"]):
         msg += "\n\nINSTRUKSI WAJIB: Kalau ada daftar item di konteks (bullet atau baris tabel), tampilkan SEMUA item itu sebagai bullet point terpisah. JANGAN ringkas jadi paragraf."
     elif any(kw in q_lower for kw in ["biaya", "pembayaran", "bayar", "kuliah", "ukt"]):
         msg += "\n\nINSTRUKSI WAJIB: Tampilkan SEMUA item biaya sebagai daftar bullet point terpisah, dengan nominal PERSIS seperti di konteks. JANGAN gabung atau ringkas."
-    elif any(kw in q_lower for kw in ["jadwal", "tanggal", "kalender", "kegiatan"]):
+    elif any(kw in q_lower for kw in ["jadwal", "tanggal", "kalender", "kegiatan", "kapan", "gelombang"]):
         msg += "\n\nINSTRUKSI WAJIB: Tampilkan SEMUA tanggal/kegiatan yang relevan sebagai daftar bullet point terpisah, jangan cuma sebut sebagian."
-    elif any(kw in q_lower for kw in ["tata cara", "cara", "langkah", "prosedur", "pengisian", "krs", "perwalian"]):
+    elif _is_procedure_question(question):
         msg += "\n\nINSTRUKSI WAJIB: Ini soal tata cara/prosedur KRS. Fokus pada bagian 'Panduan / Tata Cara / Cara Pengisian Kartu Rencana Studi (KRS) / Perwalian Online' dan tampilkan langkah-langkahnya secara berurutan. JANGAN jawab syarat, jadwal, atau biaya yang bukan prosedur pengisian KRS."
 
     return msg
@@ -711,32 +837,44 @@ def ask_minci(question: str) -> str:
     answer = strip_leaked_internal_tags(answer)
 
     # --- Fallback deterministik: kalau model gagal bikin bullet sama sekali,
-    #     tapi konteksnya jelas-jelas punya >= 4 item list, kode yang susun
-    #     daftarnya sendiri (dijamin lengkap), model cuma dipakai buat intro. ---
+    #     atau kalau pertanyaan spesifik seperti 'pra ktmb'/'perwalian'/'gelombang 3'
+    #     lebih cocok dijawab dari filtered context daripada output model yang campur,
+    #     kode yang susun daftar sendiri (dijamin sesuai topik) dan mengesampingkan
+    #     model output yang terlalu umum. ---
     q_lower = question.lower()
     is_list_question = any(kw in q_lower for kw in _LIST_QUESTION_KEYWORDS)
 
-    if context and (is_list_question or any(kw in q_lower for kw in ["gelombang", "jadwal", "tanggal", "kegiatan", "kalender", "biaya", "syarat", "persyaratan", "tata cara", "cara", "langkah", "prosedur", "pengisian", "krs", "perwalian"])):
+    if context and (is_list_question or any(kw in q_lower for kw in ["gelombang", "jadwal", "tanggal", "kegiatan", "kalender", "biaya", "syarat", "persyaratan", "tata cara", "cara", "langkah", "prosedur", "pengisian", "krs", "perwalian", "ktmb", "pra ktmb", "program studi", "prodi", "jurusan"])):
         answer_bullets = [line.strip() for line in answer.split("\n") if line.strip().startswith("-")]
 
         top_source = get_top_source_from_context(context)
         context_items = extract_items_from_source(context, top_source)
         context_items = filter_items_for_question(context_items, question)
 
-        if len(answer_bullets) == 0:
-            if any(kw in q_lower for kw in ["tata cara", "cara", "langkah", "prosedur", "pengisian", "krs", "perwalian"]):
-                procedure_context = extract_relevant_procedure_context(context, question)
-                if procedure_context and procedure_context.strip() != context.strip():
-                    intro = generate_intro_sentence(question, 1, "langkah prosedur")
-                    answer = intro + "\n" + procedure_context
-                    answer = clean_markdown(answer)
-                    answer = strip_leaked_internal_tags(answer)
-                    return answer
+        if len(context_items) >= 1:
+            question_is_specific_event = any(kw in q_lower for kw in ["gelombang", "perwalian", "herregistrasi", "ktmb", "pra ktmb", "krs", "pengisian"])
+            is_program_study_list = _is_program_study_question(question)
+            should_override_model = (
+                is_program_study_list or
+                (question_is_specific_event and len(context_items) < len(extract_items_from_source(context, top_source))) or
+                len(answer_bullets) == 0
+            )
 
-            if len(context_items) >= 1:
+            if should_override_model:
+                if _is_procedure_question(question):
+                    procedure_context = extract_relevant_procedure_context(context, question)
+                    if procedure_context and procedure_context.strip() != context.strip():
+                        intro = generate_intro_sentence(question, 1, "langkah prosedur")
+                        answer = intro + "\n" + procedure_context
+                        answer = clean_markdown(answer)
+                        answer = strip_leaked_internal_tags(answer)
+                        return answer
+
                 if "biaya" in q_lower or "bayar" in q_lower:
                     topic_label = "daftar biaya"
-                elif "jadwal" in q_lower or "tanggal" in q_lower or "kalender" in q_lower or "gelombang" in q_lower:
+                elif is_program_study_list:
+                    topic_label = "daftar program studi"
+                elif "jadwal" in q_lower or "tanggal" in q_lower or "kalender" in q_lower or "gelombang" in q_lower or "perwalian" in q_lower or "herregistrasi" in q_lower or "ktmb" in q_lower or "pra ktmb" in q_lower:
                     topic_label = "jadwal kegiatan"
                 else:
                     topic_label = "daftar persyaratan"
