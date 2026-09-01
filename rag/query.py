@@ -85,6 +85,7 @@ CHAT_MODEL = "minci"
 
 TOP_K = 10                     # jumlah kandidat chunk yang diambil dari ChromaDB
 DEBUG = True                  # tampilkan proses retrieval & routing di terminal
+USE_CHITCHAT = False          # set False agar semua pertanyaan masuk ke alur model/RAG tanpa pengecualian chit-chat
 
 MAX_RELEVANT_DISTANCE = 0.62  # ambang distance (cosine) -- di atas ini dianggap
                                # tidak nyambung & dibuang. JANGAN diturunkan terlalu
@@ -429,6 +430,77 @@ def extract_items_from_source(context: str, source: str | None) -> list[str]:
     return items
 
 
+def filter_items_for_question(items: list[str], question: str) -> list[str]:
+    """Batasi item sesuai gelombang yang ditanya, dan bila ada kegiatan spesifik, pilih item yang sesuai kegiatan itu saja."""
+    q = question.lower().strip()
+    if "gelombang" not in q:
+        return items
+
+    number_targets = []
+    if "gelombang 1" in q or "gelombang satu" in q or "gelombang i" in q:
+        number_targets += ["gelombang 1", "gelombang satu", "gelombang i"]
+    if "gelombang 2" in q or "gelombang dua" in q or "gelombang ii" in q:
+        number_targets += ["gelombang 2", "gelombang dua", "gelombang ii"]
+    if "gelombang 3" in q or "gelombang tiga" in q or "gelombang iii" in q:
+        number_targets += ["gelombang 3", "gelombang tiga", "gelombang iii"]
+
+    if not number_targets:
+        return items
+
+    filtered = []
+    for item in items:
+        lower = item.lower()
+        if any(target in lower for target in number_targets):
+            filtered.append(item)
+
+    if not filtered:
+        return items
+
+    activity_keywords = {
+        "pendaftaran": ["pendaftaran mahasiswa", "pendaftaran", "mendaftar"],
+        "seleksi": ["seleksi penerimaan", "seleksi", "tes"],
+        "pengumuman": ["pengumuman hasil seleksi", "pengumuman"],
+        "registrasi": ["registrasi administrasi", "registrasi"],
+    }
+
+    matched_activity = None
+    for name, keywords in activity_keywords.items():
+        if any(kw in q for kw in keywords):
+            matched_activity = name
+            break
+
+    if matched_activity is None:
+        return filtered
+
+    activity_filtered = []
+    for item in filtered:
+        lower = item.lower()
+        if any(kw in lower for kw in activity_keywords[matched_activity]):
+            activity_filtered.append(item)
+
+    return activity_filtered if activity_filtered else filtered
+
+
+def extract_relevant_procedure_context(context: str, question: str) -> str:
+    """Ambil blok prosedur yang paling relevan untuk pertanyaan tata cara/langkah KRS."""
+    q_lower = question.lower()
+    if not any(kw in q_lower for kw in ["tata cara", "cara", "langkah", "prosedur", "pengisian", "krs", "perwalian"]):
+        return ""
+
+    blocks = context.split("\n\n---\n\n")
+    preferred = []
+    for block in blocks:
+        lower = block.lower()
+        if "panduan / tata cara / cara pengisian kartu rencana studi" in lower or "perwalian online" in lower:
+            preferred.append(block)
+        elif "krs" in lower and ("tata cara" in lower or "cara pengisian" in lower or "langkah" in lower or "prosedur" in lower):
+            preferred.append(block)
+
+    if preferred:
+        return preferred[0]
+    return context
+
+
 def find_highlighted_lines(question: str, context: str) -> str:
     """
     Cari baris yang paling cocok secara HARFIAH (keyword sederhana, deterministik,
@@ -446,7 +518,7 @@ def find_highlighted_lines(question: str, context: str) -> str:
         ("syarat pendaftaran", ["syarat", "persyaratan", "dokumen", "berkas"]),
         ("jurusan/prodi", ["jurusan", "prodi", "program studi"]),
         ("biaya/pembayaran", ["biaya", "pembayaran", "bayar", "ukt", "nominal"]),
-        ("prosedur KRS/perwalian", ["krs", "perwalian", "sevima", "dosen wali", "herregistrasi"]),
+        ("tata cara/prosedur KRS", ["tata cara", "cara pengisian", "pengisian krs", "langkah", "prosedur", "perwalian online", "krs", "perwalian"]),
     ]
 
     matched_label, matched_keywords = None, None
@@ -507,6 +579,8 @@ Pertanyaan:
         msg += "\n\nINSTRUKSI WAJIB: Tampilkan SEMUA item biaya sebagai daftar bullet point terpisah, dengan nominal PERSIS seperti di konteks. JANGAN gabung atau ringkas."
     elif any(kw in q_lower for kw in ["jadwal", "tanggal", "kalender", "kegiatan"]):
         msg += "\n\nINSTRUKSI WAJIB: Tampilkan SEMUA tanggal/kegiatan yang relevan sebagai daftar bullet point terpisah, jangan cuma sebut sebagian."
+    elif any(kw in q_lower for kw in ["tata cara", "cara", "langkah", "prosedur", "pengisian", "krs", "perwalian"]):
+        msg += "\n\nINSTRUKSI WAJIB: Ini soal tata cara/prosedur KRS. Fokus pada bagian 'Panduan / Tata Cara / Cara Pengisian Kartu Rencana Studi (KRS) / Perwalian Online' dan tampilkan langkah-langkahnya secara berurutan. JANGAN jawab syarat, jadwal, atau biaya yang bukan prosedur pengisian KRS."
 
     return msg
 
@@ -579,7 +653,7 @@ PENTING: Jawab HANYA dengan kalimat pembukanya saja. JANGAN bullet point, JANGAN
 
 _LIST_QUESTION_KEYWORDS = [
     "syarat", "persyaratan", "biaya", "pembayaran", "apa saja", "apa aja",
-    "jadwal", "tanggal", "kegiatan", "kalender",
+    "jadwal", "tanggal", "kegiatan", "kalender", "gelombang", "kapan",
 ]
 
 
@@ -590,8 +664,10 @@ def ask_minci(question: str) -> str:
     """
     question = normalize_query_text(question)
 
-    # --- Pengecualian chit-chat: skip RAG sama sekali kalau basa-basi ---
-    if is_chitchat(question):
+    # --- Pengecualian chit-chat dinonaktifkan sesuai kebutuhan saat ini ---
+    # Bila USE_CHITCHAT=False, semua pertanyaan (termasuk sapaan) akan masuk
+    # ke alur RAG/model; kalau retrieval kosong, model langsung dipanggil.
+    if USE_CHITCHAT and is_chitchat(question):
         if DEBUG:
             print(f"\n💬 [DEBUG] '{question!r}' terdeteksi CHIT-CHAT -> skip RAG, langsung ke model.")
 
@@ -610,6 +686,8 @@ def ask_minci(question: str) -> str:
     context = retrieve_context(question)
 
     if not context.strip():
+        if DEBUG:
+            print(f"\n[DEBUG] '{question!r}' tidak ada konteks relevan -> langsung ke model Minci.")
         messages = [
             {"role": "system", "content": build_system_prompt()},
             {"role": "user", "content": f"Pertanyaan: {question}\n\nInfo: Tidak ada konteks relevan."},
@@ -638,24 +716,35 @@ def ask_minci(question: str) -> str:
     q_lower = question.lower()
     is_list_question = any(kw in q_lower for kw in _LIST_QUESTION_KEYWORDS)
 
-    if is_list_question and context:
+    if context and (is_list_question or any(kw in q_lower for kw in ["gelombang", "jadwal", "tanggal", "kegiatan", "kalender", "biaya", "syarat", "persyaratan", "tata cara", "cara", "langkah", "prosedur", "pengisian", "krs", "perwalian"])):
         answer_bullets = [line.strip() for line in answer.split("\n") if line.strip().startswith("-")]
 
         top_source = get_top_source_from_context(context)
         context_items = extract_items_from_source(context, top_source)
+        context_items = filter_items_for_question(context_items, question)
 
-        if len(answer_bullets) == 0 and len(context_items) >= 4:
-            if "biaya" in q_lower or "bayar" in q_lower:
-                topic_label = "daftar biaya"
-            elif "jadwal" in q_lower or "tanggal" in q_lower or "kalender" in q_lower:
-                topic_label = "jadwal kegiatan"
-            else:
-                topic_label = "daftar persyaratan"
+        if len(answer_bullets) == 0:
+            if any(kw in q_lower for kw in ["tata cara", "cara", "langkah", "prosedur", "pengisian", "krs", "perwalian"]):
+                procedure_context = extract_relevant_procedure_context(context, question)
+                if procedure_context and procedure_context.strip() != context.strip():
+                    intro = generate_intro_sentence(question, 1, "langkah prosedur")
+                    answer = intro + "\n" + procedure_context
+                    answer = clean_markdown(answer)
+                    answer = strip_leaked_internal_tags(answer)
+                    return answer
 
-            intro = generate_intro_sentence(question, len(context_items[:15]), topic_label)
-            answer = intro + "\n" + "\n".join(context_items[:15])
-            answer = clean_markdown(answer)
-            answer = strip_leaked_internal_tags(answer)
+            if len(context_items) >= 1:
+                if "biaya" in q_lower or "bayar" in q_lower:
+                    topic_label = "daftar biaya"
+                elif "jadwal" in q_lower or "tanggal" in q_lower or "kalender" in q_lower or "gelombang" in q_lower:
+                    topic_label = "jadwal kegiatan"
+                else:
+                    topic_label = "daftar persyaratan"
+
+                intro = generate_intro_sentence(question, len(context_items[:15]), topic_label)
+                answer = intro + "\n" + "\n".join(context_items[:15])
+                answer = clean_markdown(answer)
+                answer = strip_leaked_internal_tags(answer)
 
     return answer
 

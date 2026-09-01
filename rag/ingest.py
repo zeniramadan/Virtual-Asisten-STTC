@@ -275,6 +275,9 @@ def read_docx_text(filepath: str) -> list[list[tuple[str, bool]]]:
     - is_atomic=False -> teks biasa (heading, sub-heading, paragraf, bullet),
       tetap digabung berdasar CHUNK_SIZE seperti sebelumnya.
     """
+    filename = os.path.basename(filepath).lower()
+    is_cost_doc = "biaya" in filename
+
     document = docx.Document(filepath)
     sections = []
     current_section = []
@@ -348,6 +351,13 @@ def read_docx_text(filepath: str) -> list[list[tuple[str, bool]]]:
             current_section.append((text, False))
 
     flush_section()
+
+    if is_cost_doc and sections:
+        flat_lines = []
+        for section in sections:
+            flat_lines.extend(section)
+        return [flat_lines]
+
     return sections
 
 
@@ -355,12 +365,26 @@ def read_docx_text(filepath: str) -> list[list[tuple[str, bool]]]:
 # BAGIAN 4: Chunking per section
 # ============================================================
 
-def chunk_text(sections: list[list[tuple[str, bool]]], chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP):
+def chunk_text(sections: list[list[tuple[str, bool]]], chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP, source_filename: str = ""):
     chunks = []
+    source_name = (source_filename or "").lower()
+
+    if "krs" in source_name:
+        for section_lines in sections:
+            lines = [item for item in section_lines if item[0].strip()]
+            if not lines:
+                continue
+            chunks.append("\n".join(line for line, _ in lines))
+        return chunks
 
     for section_lines in sections:
         lines = [item for item in section_lines if item[0].strip()]
         if not lines:
+            continue
+
+        combined_text = "\n".join(line for line, _ in lines).lower()
+        if "biaya" in combined_text and len(sections) == 1:
+            chunks.append("\n".join(line for line, _ in lines))
             continue
 
         current_lines = []
@@ -468,7 +492,7 @@ def main():
             print(f"   ⚠️  PERINGATAN: tidak ada teks terbaca dari {filename}!")
             continue
 
-        chunks = chunk_text(sections)
+        chunks = chunk_text(sections, source_filename=filename)
         total_chars = sum(len(text) for section in sections for text, _ in section)
         print(f"   -> {total_chars} karakter teks terbaca, {len(chunks)} chunk dihasilkan")
 
