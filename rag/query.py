@@ -81,7 +81,7 @@ CHITCHAT_PATH = os.path.join(BASE_DIR, "..", "dataset", "chitchat.json")
 EMBED_MODEL = "bge-m3"
 EMBED_QUERY_PREFIX = ""       # bge-m3 tidak butuh prefix instruksi khusus
 
-CHAT_MODEL = "llama3.2"
+CHAT_MODEL = "minci"
 
 TOP_K = 10                     # jumlah kandidat chunk yang diambil dari ChromaDB
 DEBUG = True                  # tampilkan proses retrieval & routing di terminal
@@ -133,6 +133,36 @@ if _count == 0:
     print("   Jalankan dulu: python ingest.py (pastikan ada file .docx di folder documents/)")
 else:
     print(f"✅ ChromaDB terbaca: {_count} chunk siap dipakai (dari {CHROMA_DB_DIR})")
+
+
+# ============================================================
+# BAGIAN 0: NORMALISASI QUERY (bahasa natural -> bentuk yang cocok dengan dokumen)
+# ============================================================
+# Query pengguna sering pakai kata seperti "gelombang satu" atau "gelombang dua"
+# sedangkan dokumen menyimpan data sebagai "Gelombang 1", "Gelombang 2".
+# Tanpa normalisasi, embedding bisa sedikit kurang cocok walau konteks sebenarnya
+# sudah ada. Ini fix ringan tapi berdampak besar untuk pertanyaan seperti:
+# "hasil seleksi gelombang satu kapan?"
+
+_NUMBER_WORDS = {
+    "nol": "0", "satu": "1", "dua": "2", "tiga": "3", "empat": "4",
+    "lima": "5", "enam": "6", "tujuh": "7", "delapan": "8", "sembilan": "9",
+    "sepuluh": "10",
+}
+
+
+def normalize_query_text(question: str) -> str:
+    """Normalisasi bentuk natural-language agar lebih cocok dengan entri dokumen."""
+    q = question.strip()
+    q = q.replace("Gelombang I", "Gelombang 1").replace("gelombang i", "gelombang 1")
+    q = q.replace("Gelombang II", "Gelombang 2").replace("gelombang ii", "gelombang 2")
+    q = q.replace("Gelombang III", "Gelombang 3").replace("gelombang iii", "gelombang 3")
+
+    for word, number in _NUMBER_WORDS.items():
+        q = re.sub(rf"\bgelombang\s+{word}\b", f"gelombang {number}", q, flags=re.IGNORECASE)
+        q = re.sub(rf"\bgelombang\s+{word}\b", f"gelombang {number}", q, flags=re.IGNORECASE)
+
+    return q
 
 
 # ============================================================
@@ -412,7 +442,8 @@ def find_highlighted_lines(question: str, context: str) -> str:
         ("pengumuman hasil seleksi", ["pengumuman"]),
         ("jadwal/tanggal kegiatan", ["jadwal", "tanggal", "kalender", "kapan"]),
         ("seleksi/tes", ["seleksi", "tes", "ujian"]),
-        ("pendaftaran/syarat PMB", ["pendaftaran", "buka", "dibuka", "penerimaan", "gelombang", "syarat", "persyaratan", "administrasi"]),
+        ("pendaftaran PMB", ["pendaftaran", "buka", "dibuka", "penerimaan", "gelombang", "syarat", "persyaratan", "administrasi"]),
+        ("syarat pendaftaran", ["syarat", "persyaratan", "dokumen", "berkas"]),
         ("jurusan/prodi", ["jurusan", "prodi", "program studi"]),
         ("biaya/pembayaran", ["biaya", "pembayaran", "bayar", "ukt", "nominal"]),
         ("prosedur KRS/perwalian", ["krs", "perwalian", "sevima", "dosen wali", "herregistrasi"]),
@@ -449,27 +480,17 @@ def find_highlighted_lines(question: str, context: str) -> str:
 # ============================================================
 
 def build_system_prompt() -> str:
-    return """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Kamu membantu mahasiswa dan calon mahasiswa terkait PMB (Penerimaan Mahasiswa Baru), KRS (Kartu Rencana Studi), biaya kuliah, dan kalender akademik. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan dan tidak berlebihan.
+    return """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan dan tidak berlebihan.
 
 ATURAN WAJIB:
-1. Jawab HANYA dari konteks yang diberikan. DILARANG mengarang, menambah tanggal/info yang tidak tertulis, atau pakai pengetahuan lain.
-2. Jika info TIDAK ADA di konteks, jawab PERSIS: "Maaf kak, informasi tersebut tidak ada di panduan. Silakan hubungi bagian Tata Usaha."
-3. Konteks bisa berisi beberapa gelombang/semester/topik sekaligus. Cek TIAP baris, cari yang cocok dengan pertanyaan (gelombang 1 = Gelombang I). Jangan menyerah hanya karena ada baris lain yang beda topik.
-4. JANGAN campur data antar gelombang/semester. Nomor yang kamu sebut HARUS SAMA dengan nomor di baris sumber. Jangan labeli Gelombang II sebagai Gelombang I.
-5. Jika pertanyaan tidak spesifik gelombang/semester mana, sebutkan SEMUA yang ada di konteks dengan lengkap.
-6. Bedakan jenis kegiatan/tanggal: "Pendaftaran" ≠ "Seleksi" ≠ "Pengumuman" ≠ "Registrasi" ≠ "Herregistrasi". Ambil baris yang PERSIS sesuai jenis kegiatan yang ditanya.
-7. Jika konteks berisi campuran topik berbeda (PMB, KRS, biaya, kalender), fokus HANYA pada topik yang ditanya. Abaikan bagian konteks lain yang topiknya beda.
-8. JANGAN tambah penutup/saran/pengingat apapun yang tidak ada di konteks dan tidak diminta user. Jawab PERSIS yang ditanya saja.
-9. Sesuaikan pembuka: jika user menyapa (halo/selamat pagi/dst), balas sapaannya + "Ada yang bisa Minci bantu, kak?". Jika tidak menyapa, jangan menyapa duluan, langsung jawab.
-10. JANGAN pakai format markdown (##, **, penomoran 1/2/3). Pakai bullet "-" untuk daftar.
-11. SANGAT PENTING -- JANGAN PERNAH menyebutkan nama file dokumen (seperti "PMB.docx", "KRS.docx", "BIAYA.docx", "KALENDER.docx") ke user. User tidak perlu tahu dari file mana info itu berasal -- cukup jawab isinya langsung secara natural, seolah kamu memang tahu infonya, bukan "membaca dari file X".
-12. JANGAN PERNAH menampilkan tag internal seperti "[Sumber: ...]", "[Konteks: ...]", atau "[Bagian: ...]" ke jawaban -- itu metadata internal sistem, bukan untuk ditampilkan ke user.
-13. Jika ditanya daftar jurusan/prodi, sebutkan LANGSUNG namanya. Jangan jelaskan prospek/detail kecuali ditanya spesifik.
-14. Jika konteks berupa daftar/list (syarat, biaya, jadwal, dll), tulis dalam bentuk bullet point, JANGAN diringkas jadi paragraf. TULISKAN SEMUA item yang ada di konteks dengan lengkap, jangan pilih-pilih atau digabung jadi satu baris generik.
-15. Jika ditanya tentang beasiswa, JANGAN sarankan memilih beasiswa tertentu -- itu bukan keputusan yang boleh kamu ambilkan.
-16. Jika data di konteks tidak lengkap untuk menjawab, katakan jujur "informasi itu belum lengkap di panduan yang Minci punya" -- JANGAN menebak atau melengkapi sendiri.
+1. Jawab HANYA dari konteks yang diberikan. DILARANG mengarang, menambah tanggal/info yang tidak tertulis, atau pakai pengetahuan lain. Jika info TIDAK ADA di konteks, jawab PERSIS: "Maaf kak, informasi tersebut tidak ada di panduan. Silakan hubungi bagian Tata Usaha."
+2. JANGAN campur data antar gelombang/semester atau salah sebut jenis kegiatan (Pendaftaran ≠ Seleksi ≠ Pengumuman). Ambil baris yang PERSIS sesuai.
+3. JANGAN pakai format markdown (##, **, penomoran 1/2/3). Pakai bullet "-" untuk daftar.
+4. SANGAT PENTING -- JANGAN PERNAH menyebutkan nama file dokumen (seperti "PMB.docx", dll) dan JANGAN PERNAH menampilkan tag internal seperti "[Sumber: ...]" ke jawaban.
+5. Jika konteks berupa daftar/list (syarat, biaya, jadwal, dll), tulis dalam bentuk bullet point, JANGAN diringkas jadi paragraf. TULISKAN SEMUA item yang ada di konteks dengan lengkap.
+6. JANGAN tambah penutup/saran/pengingat apapun yang tidak ada di konteks dan tidak diminta user. Jawab PERSIS yang ditanya saja.
 
-Jawab singkat, jelas, ceria, tidak bertele-tele, dan tidak ambigu."""
+Jawab dengan jelas, ceria, tidak bertele-tele, dan tidak ambigu."""
 
 
 def build_user_message(question: str, context: str) -> str:
@@ -567,6 +588,7 @@ def ask_minci(question: str) -> str:
     Fungsi utama: retrieval + generation. Setiap pertanyaan diproses berdiri
     sendiri (TIDAK ada riwayat/memori percakapan -- fitur ini sudah dilepas).
     """
+    question = normalize_query_text(question)
 
     # --- Pengecualian chit-chat: skip RAG sama sekali kalau basa-basi ---
     if is_chitchat(question):
