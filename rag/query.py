@@ -85,7 +85,7 @@ CHAT_MODEL = "minci"
 
 TOP_K = 10                     # jumlah kandidat chunk yang diambil dari ChromaDB
 DEBUG = True                  # tampilkan proses retrieval & routing di terminal
-USE_CHITCHAT = False          # set False agar semua pertanyaan masuk ke alur model/RAG tanpa pengecualian chit-chat
+USE_CHITCHAT = True           # aktifkan lagi pengecualian chit-chat seperti alur awal
 
 MAX_RELEVANT_DISTANCE = 0.62  # ambang distance (cosine) -- di atas ini dianggap
                                # tidak nyambung & dibuang. JANGAN diturunkan terlalu
@@ -111,6 +111,7 @@ SOURCE_DOMINANCE_MARGIN = 0.05  # chunk dari dokumen LAIN (beda dari dokumen top
 PREFERRED_SOURCE_KEYWORDS: list[tuple[list[str], str]] = [
     (["jadwal", "tanggal", "kalender", "kapan", "gelombang"], "KALENDER.docx"),
     (["biaya", "bayar", "nominal", "harga", "ukt", "pembayaran", "cicil"], "BIAYA.docx"),
+    (["beasiswa", "jenis beasiswa", "fasilitas beasiswa", "kuota beasiswa", "beasiswa apa"], "PMB.docx"),
     (["program studi", "prodi", "jurusan", "program studi apa", "ada prodi"], "PMB.docx"),
 ]
 
@@ -362,6 +363,7 @@ def retrieve_context(question: str, top_k: int = TOP_K) -> str:
         print("=" * 70)
 
     exact_event_terms = _extract_exact_event_terms(question)
+    is_about_question = _is_about_institution_question(question)
     context_blocks = []
     for doc, meta, dist in zip(documents, metadatas, distances):
         source = meta.get("source", "dokumen")
@@ -383,6 +385,26 @@ def retrieve_context(question: str, top_k: int = TOP_K) -> str:
             elif dist > best_distance + SOURCE_DOMINANCE_MARGIN:
                 dipakai = False
                 alasan = f"❌ DIBUANG (dokumen '{source}' beda dari topik utama '{top_source}')"
+
+        if is_about_question:
+            doc_lower = doc.lower()
+            profile_markers = [
+                "sekilas tentang stt cipasung",
+                "didirikan pada tahun 1997",
+                "berbasis lingkungan pesantren",
+                "institusi:",
+                "alamat:",
+                "telepon:",
+                "email:",
+                "website:",
+                "pusat informasi",
+                "jejaring dan kerjasama",
+                "kerjasama dengan industri",
+                "sekolah tinggi teknologi cipasung",
+            ]
+            if not any(marker in doc_lower for marker in profile_markers):
+                dipakai = False
+                alasan = "❌ DIBUANG (bukan blok profil institusi yang relevan untuk pertanyaan tentang kampus)"
 
         if exact_event_terms and source == top_source:
             doc_lower = doc.lower()
@@ -498,9 +520,144 @@ def _is_program_study_question(question: str) -> bool:
     return any(kw in q_lower for kw in ["program studi", "prodi", "jurusan", "ada prodi", "ada jurusan", "program studi apa"])
 
 
+def _is_beasiswa_question(question: str) -> bool:
+    """Cek apakah pertanyaan menanyakan jenis/fasilitas beasiswa."""
+    q_lower = question.lower()
+    return any(kw in q_lower for kw in [
+        "beasiswa", "jenis beasiswa", "fasilitas beasiswa", "ada beasiswa", "beasiswa apa", "program beasiswa"
+    ])
+
+
+def _is_ukm_question(question: str) -> bool:
+    """Cek apakah pertanyaan menanyakan UKM / unit kegiatan mahasiswa."""
+    q_lower = question.lower()
+    return any(kw in q_lower for kw in [
+        "ukm", "unit kegiatan mahasiswa", "kegiatan mahasiswa",
+        "ukm apa", "ada ukm", "ukm di kampus", "ukm apa saja",
+        "apa saja ukm", "ukm di sttc", "ukm kampus", "info ukm",
+        "ukm ada apa", "ukm ada apa aja", "daftar ukm"
+    ])
+
+
+def _is_program_profile_question(question: str) -> bool:
+    """Cek apakah pertanyaan menanyakan profil/deskripsi program studi seperti 'tentang informatika'."""
+    q_lower = question.lower()
+    return (
+        ("tentang" in q_lower and ("informatika" in q_lower or "teknik industri" in q_lower or "prodi" in q_lower or "program studi" in q_lower))
+        or any(kw in q_lower for kw in [
+            "tentang informatika",
+            "profil informatika",
+            "profil prodi informatika",
+            "tentang teknik industri",
+            "profil teknik industri",
+            "profil prodi teknik industri",
+            "tentang prodi informatika",
+            "tentang prodi teknik industri",
+        ])
+    )
+
+
+def _is_about_institution_question(question: str) -> bool:
+    """Cek apakah pertanyaan menanyakan profil/sekilas kampus / tentang STTC."""
+    q_lower = question.lower()
+    return any(kw in q_lower for kw in ["tentang sttc", "tentang kampus", "profil sttc", "profil kampus", "sekilas stt cipasung", "sekilas tentang", "sttc", "kampus sttc"]) and not any(kw in q_lower for kw in ["program studi", "prodi", "jurusan", "biaya", "jadwal", "krs", "kapan"])
+
+
+def _detect_question_category(question: str) -> str:
+    """Klasifikasi topik utama pertanyaan agar routing dan filter konsisten di satu tempat."""
+    q_lower = question.lower()
+
+    if USE_CHITCHAT and is_chitchat(question):
+        return "chitchat"
+    if _is_about_institution_question(question):
+        return "institution"
+    if _is_program_profile_question(question):
+        return "program_profile"
+    if _is_program_study_question(question):
+        return "program_study"
+    if _is_beasiswa_question(question):
+        return "beasiswa"
+    if _is_ukm_question(question):
+        return "ukm"
+    if _is_procedure_question(question):
+        return "krs_procedure"
+    if _extract_exact_event_terms(question):
+        return "calendar_event"
+    if any(kw in q_lower for kw in ["biaya", "bayar", "harga", "ukt", "pembayaran", "cicil"]):
+        return "biaya"
+    if any(kw in q_lower for kw in ["jadwal", "tanggal", "kalender", "kapan", "gelombang"]):
+        return "calendar"
+    if any(kw in q_lower for kw in ["syarat", "persyaratan", "pendaftaran"]):
+        return "requirements"
+    return "general"
+
+
 def filter_items_for_question(items: list[str], question: str) -> list[str]:
     """Batasi item sesuai event/topik yang ditanya, menggunakan aturan event yang sudah dipusatkan."""
     q = _normalize_calendar_question(question)
+
+    if _is_beasiswa_question(question):
+        filtered = [
+            item for item in items
+            if any(kw in item.lower() for kw in [
+                "beasiswa", "kip-k", "ukt 100%", "bebas/ p", "fasilitas beasiswa", "jenis beasiswa"
+            ])
+        ]
+        if filtered:
+            return filtered[:20]
+
+    if _is_ukm_question(question):
+        ukm_aliases = [
+            "proclub", "kelapa", "sanggar terasi", "kdd", "dignity", "ukm kerohanian",
+            "ukm olahraga", "rilis", "pencak silat", "unit kegiatan mahasiswa", "ukm yang saat ini ada"
+        ]
+        filtered = [
+            item for item in items
+            if any(alias in item.lower() for alias in ukm_aliases) or "ukm" in item.lower()
+        ]
+        if filtered:
+            return filtered[:20]
+
+    if _is_about_institution_question(question):
+        profile_keywords = [
+            "didirikan pada tahun 1997",
+            "berbasis lingkungan pesantren",
+            "institusi:",
+            "alamat:",
+            "telepon:",
+            "email:",
+            "website:",
+            "pusat informasi",
+            "kerjasama dengan industri",
+            "jejaring dan kerjasama",
+            "sekolah tinggi teknologi cipasung",
+            "stt cipasung hadir",
+            "program studi teknik industri",
+            "program studi informatika",
+            "teknik industri dan informatika",
+        ]
+        filtered = [
+            item for item in items
+            if any(kw in item.lower() for kw in profile_keywords)
+            and not any(kw in item.lower() for kw in [
+                "mengisi formulir pendaftaran",
+                "membayar biaya pendaftaran",
+                "scan ijazah",
+                "scan ktp",
+                "scan pas foto",
+                "scan kartu keluarga",
+                "scan akta lahir",
+                "link pendaftaran",
+                "s.id/pmbsttc",
+                "biaya pendaftaran",
+                "unit kegiatan mahasiswa",
+                "ukm",
+                "beasiswa",
+                "prospek kerja",
+            ])
+        ]
+        if filtered:
+            return filtered[:8]
 
     if _is_program_study_question(question):
         filtered = [item for item in items if re.search(r"\bS1\b", item, flags=re.IGNORECASE)]
@@ -606,6 +763,31 @@ def extract_relevant_procedure_context(context: str, question: str) -> str:
     return context
 
 
+def extract_relevant_program_context(context: str, question: str) -> str:
+    """Ambil blok program studi yang paling relevan untuk pertanyaan 'tentang informatika' / 'tentang teknik industri'."""
+    q_lower = question.lower()
+    if not _is_program_profile_question(question):
+        return ""
+
+    target_terms = []
+    if "informatika" in q_lower:
+        target_terms += ["informatika", "prodi informatika"]
+    if "teknik industri" in q_lower:
+        target_terms += ["teknik industri", "prodi teknik industri"]
+    if "prodi" in q_lower and "informatika" in q_lower:
+        target_terms += ["informatika"]
+    if "prodi" in q_lower and "teknik industri" in q_lower:
+        target_terms += ["teknik industri"]
+
+    blocks = context.split("\n\n---\n\n")
+    for block in blocks:
+        lower = block.lower()
+        if any(term in lower for term in target_terms):
+            return block
+
+    return context
+
+
 def find_highlighted_lines(question: str, context: str) -> str:
     """
     Cari baris yang paling cocok secara HARFIAH (keyword sederhana, deterministik,
@@ -681,8 +863,25 @@ Pertanyaan:
     q_lower = question.lower()
     event_label = _get_event_match_label(question)
     event_terms = _extract_exact_event_terms(question)
+    category = _detect_question_category(question)
 
-    if _is_program_study_question(question):
+    if category == "institution":
+        msg += "\n\nINSTRUKSI WAJIB: Ini pertanyaan tentang profil/sekilas STT Cipasung. Jawab berdasarkan konteks yang menjelaskan latar belakang, visi/misi, atau profil kampus. JANGAN bilang 'tidak ada di panduan' jika konteks yang relevan sudah ada. Tulis jawaban singkat namun jelas, bukan daftar item yang tidak relevan."
+        return msg
+
+    if category == "program_profile":
+        msg += "\n\nINSTRUKSI WAJIB: Ini pertanyaan menanyakan profil atau deskripsi program studi. Jawab berdasarkan konteks yang menjelaskan apa itu program studi, fokus pada definisi, pembelajaran, atau prospek kerja sesuai blok yang relevan. JANGAN menjawab 'tidak ada di panduan' bila blok deskripsi program sudah ada di konteks."
+        return msg
+
+    if category == "beasiswa":
+        msg += "\n\nINSTRUKSI WAJIB: Ini pertanyaan menanyakan jenis atau fasilitas beasiswa. Tampilkan daftar beasiswa yang ada, termasuk fasilitas yang didapat. JANGAN jawab dengan profil kampus atau prodi lainnya."
+        return msg
+
+    if category == "ukm":
+        msg += "\n\nINSTRUKSI WAJIB: Ini pertanyaan menanyakan UKM / Unit Kegiatan Mahasiswa. Tampilkan daftar UKM yang ada di kampus, bukan profil kampus, prodi, atau beasiswa."
+        return msg
+
+    if category == "program_study":
         msg += "\n\nINSTRUKSI WAJIB: Ini pertanyaan menanyakan daftar program studi / jurusan yang ada. HANYA tampilkan nama program studi yang tersedia, seperti 'S1 Teknik Industri' dan 'S1 Informatika'. JANGAN tampilkan deskripsi prodi, prospek kerja, UKM, beasiswa, atau detail lain yang bukan daftar nama program studi."
         return msg
 
@@ -783,6 +982,44 @@ _LIST_QUESTION_KEYWORDS = [
 ]
 
 
+def _is_list_or_detail_question(question: str, category: str) -> bool:
+    """Cek apakah pertanyaan masuk jalur list/detail yang perlu dibatasi ke konteks topik."""
+    q_lower = question.lower()
+    if any(kw in q_lower for kw in _LIST_QUESTION_KEYWORDS):
+        return True
+    if category in {"institution", "program_profile", "beasiswa", "ukm", "calendar_event", "calendar", "biaya", "requirements", "program_study", "krs_procedure"}:
+        return True
+    if any(kw in q_lower for kw in [
+        "gelombang", "jadwal", "tanggal", "kegiatan", "kalender", "biaya",
+        "syarat", "persyaratan", "tata cara", "cara", "langkah", "prosedur",
+        "pengisian", "krs", "perwalian", "ktmb", "pra ktmb", "program studi",
+        "prodi", "jurusan"
+    ]):
+        return True
+    return False
+
+
+def _detect_topic_label(question: str, category: str) -> str:
+    """Mapping label topik yang dipakai untuk kalimat pembuka fallback."""
+    q_lower = question.lower()
+
+    if category == "beasiswa":
+        return "jenis beasiswa"
+    if category == "ukm":
+        return "daftar UKM"
+    if "biaya" in q_lower or "bayar" in q_lower:
+        return "daftar biaya"
+    if category == "program_study":
+        return "daftar program studi"
+    if category == "institution":
+        return "profil kampus"
+    if category == "program_profile":
+        return "profil program studi"
+    if any(kw in q_lower for kw in ["jadwal", "tanggal", "kalender", "gelombang", "perwalian", "herregistrasi", "ktmb", "pra ktmb"]):
+        return "jadwal kegiatan"
+    return "daftar persyaratan"
+
+
 def ask_minci(question: str) -> str:
     """
     Fungsi utama: retrieval + generation. Setiap pertanyaan diproses berdiri
@@ -813,18 +1050,15 @@ def ask_minci(question: str) -> str:
 
     if not context.strip():
         if DEBUG:
-            print(f"\n[DEBUG] '{question!r}' tidak ada konteks relevan -> langsung ke model Minci.")
-        messages = [
-            {"role": "system", "content": build_system_prompt()},
-            {"role": "user", "content": f"Pertanyaan: {question}\n\nInfo: Tidak ada konteks relevan."},
-        ]
-    else:
-        hint = find_highlighted_lines(question, context)
-        full_context = hint + "\n\n" + context if hint else context
-        messages = [
-            {"role": "system", "content": build_system_prompt()},
-            {"role": "user", "content": build_user_message(question, full_context)},
-        ]
+            print(f"\n[DEBUG] '{question!r}' tidak ada konteks relevan -> jawaban deterministik tanpa memanggil model Minci.")
+        return "Maaf kak, informasi yang Anda tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha."
+
+    hint = find_highlighted_lines(question, context)
+    full_context = hint + "\n\n" + context if hint else context
+    messages = [
+        {"role": "system", "content": build_system_prompt()},
+        {"role": "user", "content": build_user_message(question, full_context)},
+    ]
 
     response = ollama.chat(
         model=CHAT_MODEL,
@@ -842,20 +1076,33 @@ def ask_minci(question: str) -> str:
     #     kode yang susun daftar sendiri (dijamin sesuai topik) dan mengesampingkan
     #     model output yang terlalu umum. ---
     q_lower = question.lower()
-    is_list_question = any(kw in q_lower for kw in _LIST_QUESTION_KEYWORDS)
+    category = _detect_question_category(question)
 
-    if context and (is_list_question or any(kw in q_lower for kw in ["gelombang", "jadwal", "tanggal", "kegiatan", "kalender", "biaya", "syarat", "persyaratan", "tata cara", "cara", "langkah", "prosedur", "pengisian", "krs", "perwalian", "ktmb", "pra ktmb", "program studi", "prodi", "jurusan"])):
+    if context and _is_list_or_detail_question(question, category):
         answer_bullets = [line.strip() for line in answer.split("\n") if line.strip().startswith("-")]
 
         top_source = get_top_source_from_context(context)
         context_items = extract_items_from_source(context, top_source)
         context_items = filter_items_for_question(context_items, question)
 
+        if category == "program_profile":
+            program_context = extract_relevant_program_context(context, question)
+            if program_context and program_context.strip() != context.strip():
+                intro = generate_intro_sentence(question, 1, "profil program studi")
+                answer = intro + "\n" + program_context
+                answer = clean_markdown(answer)
+                answer = strip_leaked_internal_tags(answer)
+                return answer
+
         if len(context_items) >= 1:
             question_is_specific_event = any(kw in q_lower for kw in ["gelombang", "perwalian", "herregistrasi", "ktmb", "pra ktmb", "krs", "pengisian"])
-            is_program_study_list = _is_program_study_question(question)
+            is_program_study_list = category == "program_study"
+            is_about_institution = category == "institution"
+            is_program_profile = category == "program_profile"
+            is_beasiswa = category == "beasiswa"
+            is_ukm = category == "ukm"
             should_override_model = (
-                is_program_study_list or
+                is_about_institution or is_program_study_list or is_program_profile or is_beasiswa or is_ukm or
                 (question_is_specific_event and len(context_items) < len(extract_items_from_source(context, top_source))) or
                 len(answer_bullets) == 0
             )
@@ -870,15 +1117,7 @@ def ask_minci(question: str) -> str:
                         answer = strip_leaked_internal_tags(answer)
                         return answer
 
-                if "biaya" in q_lower or "bayar" in q_lower:
-                    topic_label = "daftar biaya"
-                elif is_program_study_list:
-                    topic_label = "daftar program studi"
-                elif "jadwal" in q_lower or "tanggal" in q_lower or "kalender" in q_lower or "gelombang" in q_lower or "perwalian" in q_lower or "herregistrasi" in q_lower or "ktmb" in q_lower or "pra ktmb" in q_lower:
-                    topic_label = "jadwal kegiatan"
-                else:
-                    topic_label = "daftar persyaratan"
-
+                topic_label = _detect_topic_label(question, category)
                 intro = generate_intro_sentence(question, len(context_items[:15]), topic_label)
                 answer = intro + "\n" + "\n".join(context_items[:15])
                 answer = clean_markdown(answer)
