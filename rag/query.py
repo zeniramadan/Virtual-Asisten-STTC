@@ -571,7 +571,8 @@ def _is_program_profile_question(question: str) -> bool:
 def _is_about_institution_question(question: str) -> bool:
     """Cek apakah pertanyaan menanyakan profil/sekilas kampus / tentang STTC."""
     q_lower = question.lower()
-    return any(kw in q_lower for kw in ["tentang sttc", "tentang kampus", "profil sttc", "profil kampus", "sekilas stt cipasung", "sekilas tentang", "sttc", "kampus sttc"]) and not any(kw in q_lower for kw in ["program studi", "prodi", "jurusan", "biaya", "jadwal", "krs", "kapan"])
+    institution_keywords = ["tentang sttc", "tentang kampus", "profil sttc", "profil kampus", "sekilas stt cipasung", "sekilas tentang", "sttc", "kampus sttc"]
+    return any(kw in q_lower for kw in institution_keywords) and not any(kw in q_lower for kw in ["program studi", "prodi", "jurusan", "biaya", "jadwal", "krs", "kapan"])
 
 
 def _parse_calendar_fields(item: str) -> dict[str, str]:
@@ -591,6 +592,56 @@ def _parse_calendar_fields(item: str) -> dict[str, str]:
         if match:
             fields[label] = match.group(1).strip()
     return fields
+
+
+def _naturalize_calendar_item(item: str) -> str:
+    """Ubah satu baris kalender berlabel menjadi bullet kalimat yang natural."""
+    fields = _parse_calendar_fields(item)
+    activity = fields.get("kegiatan", "")
+    date = fields.get("tanggal", "")
+    wave = fields.get("gelombang", "")
+    if not activity or not date:
+        return item
+    if wave:
+        return f"- {activity} {wave.lower()} dilaksanakan pada {date}."
+    return f"- {activity} dilaksanakan pada {date}."
+
+
+def _naturalize_cost_item(item: str) -> str:
+    """Ubah satu baris biaya berlabel menjadi bullet kalimat yang natural."""
+    cost_match = re.search(r"Biaya\s*:\s*(.*?)(?=,\s*Keterangan\s*:|,\s*Jumlah\s*\(Rp\)\s*:|$)", item, re.IGNORECASE)
+    amount_match = re.search(r"Jumlah\s*\(Rp\)\s*:\s*([^,]+)", item, re.IGNORECASE)
+    note_match = re.search(r"Keterangan\s*:\s*(.*?)(?=,\s*Jumlah\s*\(Rp\)\s*:|$)", item, re.IGNORECASE)
+    if not cost_match or not amount_match:
+        return item
+    cost = cost_match.group(1).strip()
+    amount = amount_match.group(1).strip()
+    note = note_match.group(1).strip() if note_match else ""
+    if note:
+        return f"- {cost} berjumlah Rp{amount}, dengan keterangan: {note.rstrip('.')}."
+    return f"- {cost} berjumlah Rp{amount}."
+
+
+def _naturalize_contact_item(item: str) -> str:
+    """Ubah label kontak sederhana menjadi bullet kalimat yang natural."""
+    match = re.match(r"-\s*(Alamat|Lokasi|Website|Email|Telepon|Pusat Informasi)\s*:\s*(.+)", item, re.IGNORECASE)
+    if not match:
+        return item
+    label = match.group(1).lower()
+    value = match.group(2).strip()
+    if label in {"alamat", "lokasi"}:
+        return f"- Alamat lengkap STT Cipasung berada di {value}."
+    return f"- {match.group(1)} STT Cipasung: {value}."
+
+
+def _naturalize_answer_items(answer: str) -> str:
+    """Normalisasi bullet kalender dan biaya mentah tanpa mengubah fakta sumber."""
+    return "\n".join(
+        _naturalize_cost_item(line) if re.search(r"Jumlah\s*\(Rp\)\s*:", line, re.IGNORECASE) else (
+            _naturalize_calendar_item(_naturalize_contact_item(line)) if line.strip().startswith("-") else line
+        )
+        for line in answer.splitlines()
+    )
 
 
 def _filter_calendar_items_generically(items: list[str], question: str) -> list[str]:
@@ -637,6 +688,48 @@ def _filter_calendar_items_generically(items: list[str], question: str) -> list[
     return [item for score, item in scored if score == best_score]
 
 
+def _filter_cost_items_generically(items: list[str], question: str) -> list[str]:
+    """Pilih item biaya yang paling sesuai dengan label biaya pada pertanyaan."""
+    cost_items = [item for item in items if re.search(r"Biaya\s*:", item, re.IGNORECASE)]
+    if not cost_items:
+        return []
+    normalized_question = _normalize_calendar_question(question)
+    query_terms = re.findall(r"[a-z0-9]+", normalized_question)
+    ignored_terms = {"biaya", "berapa", "nominal", "harga", "bayar", "pembayaran", "kuliah", "yang", "untuk"}
+    meaningful_terms = [term for term in query_terms if term not in ignored_terms]
+    if not meaningful_terms:
+        return cost_items
+    scored = []
+    for item in cost_items:
+        cost_match = re.search(r"Biaya\s*:\s*([^,]+)", item, re.IGNORECASE)
+        cost_label = cost_match.group(1).lower() if cost_match else ""
+        score = sum(term in cost_label.split() for term in meaningful_terms)
+        if " ".join(meaningful_terms) in cost_label:
+            score += 100
+        scored.append((score, item))
+    best_score = max(score for score, _item in scored)
+    return [item for score, item in scored if score == best_score] if best_score else cost_items
+
+
+def _filter_items_by_question_terms(items: list[str], question: str) -> list[str]:
+    """Pilih item dengan kecocokan istilah tertinggi terhadap pertanyaan."""
+    ignored_terms = {
+        "apa", "apakah", "bagaimana", "berapa", "dimana", "di", "dari", "dan",
+        "yang", "untuk", "tentang", "mengenai", "informasi", "lengkap", "resmi",
+        "kampus", "sttc", "stt", "cipasung", "tolong", "mohon", "kak", "ya",
+    }
+    terms = [term for term in re.findall(r"[a-z0-9]+", question.lower()) if term not in ignored_terms]
+    if not terms:
+        return items
+    scored = []
+    for item in items:
+        item_terms = set(re.findall(r"[a-z0-9]+", item.lower()))
+        score = sum(term in item_terms for term in terms)
+        scored.append((score, item))
+    best_score = max(score for score, _item in scored) if scored else 0
+    return [item for score, item in scored if score == best_score] if best_score else items
+
+
 def _detect_question_category(question: str) -> str:
     """Klasifikasi topik utama pertanyaan agar routing dan filter konsisten di satu tempat."""
     q_lower = question.lower()
@@ -672,6 +765,11 @@ def filter_items_for_question(items: list[str], question: str) -> list[str]:
     """Batasi item sesuai event/topik yang ditanya, menggunakan aturan event yang sudah dipusatkan."""
     q = _normalize_calendar_question(question)
 
+    if any(kw in q for kw in ["alamat", "lokasi kampus"]):
+        filtered = [item for item in items if "alamat:" in item.lower()]
+        if filtered:
+            return filtered
+
     if _is_beasiswa_question(question):
         filtered = [
             item for item in items
@@ -695,43 +793,7 @@ def filter_items_for_question(items: list[str], question: str) -> list[str]:
             return filtered[:20]
 
     if _is_about_institution_question(question):
-        profile_keywords = [
-            "didirikan pada tahun 1997",
-            "berbasis lingkungan pesantren",
-            "institusi:",
-            "alamat:",
-            "telepon:",
-            "email:",
-            "website:",
-            "pusat informasi",
-            "kerjasama dengan industri",
-            "jejaring dan kerjasama",
-            "sekolah tinggi teknologi cipasung",
-            "stt cipasung hadir",
-            "program studi teknik industri",
-            "program studi informatika",
-            "teknik industri dan informatika",
-        ]
-        filtered = [
-            item for item in items
-            if any(kw in item.lower() for kw in profile_keywords)
-            and not any(kw in item.lower() for kw in [
-                "mengisi formulir pendaftaran",
-                "membayar biaya pendaftaran",
-                "scan ijazah",
-                "scan ktp",
-                "scan pas foto",
-                "scan kartu keluarga",
-                "scan akta lahir",
-                "link pendaftaran",
-                "s.id/pmbsttc",
-                "biaya pendaftaran",
-                "unit kegiatan mahasiswa",
-                "ukm",
-                "beasiswa",
-                "prospek kerja",
-            ])
-        ]
+        filtered = _filter_items_by_question_terms(items, question)
         if filtered:
             return filtered[:8]
 
@@ -747,6 +809,14 @@ def filter_items_for_question(items: list[str], question: str) -> list[str]:
         ]
         if filtered:
             return filtered
+
+    if _detect_question_category(question) == "requirements":
+        return items
+
+    if any(kw in question.lower() for kw in ["biaya", "nominal", "harga", "bayar", "pembayaran"]):
+        cost_items = _filter_cost_items_generically(items, question)
+        if cost_items:
+            return cost_items
 
     generic_calendar_items = _filter_calendar_items_generically(items, question)
     if generic_calendar_items:
@@ -778,6 +848,10 @@ def filter_items_for_question(items: list[str], question: str) -> list[str]:
             filtered = [item for item in items if any(kw in item.lower() for kw in keywords)]
             if filtered:
                 return filtered
+
+    generic_items = _filter_items_by_question_terms(items, question)
+    if generic_items and generic_items != items:
+        return generic_items
 
     if "gelombang" not in q:
         return items
@@ -1076,6 +1150,44 @@ PENTING: Jawab HANYA dengan kalimat pembukanya saja. JANGAN bullet point, JANGAN
         return f"Berikut {topic_label}-nya, kak:"
 
 
+def generate_focused_answer(question: str, items: list[str], topic_label: str) -> str:
+    """Generate jawaban natural dari item yang sudah dipastikan relevan."""
+    context = "\n".join(items)
+    prompt = f"""Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Jawab pertanyaan user dengan natural, singkat, ramah, dan langsung ke inti.
+
+Pertanyaan user: {question}
+Topik jawaban: {topic_label}
+Data yang boleh dipakai HANYA:
+{context}
+
+Buat jawaban 1-2 kalimat pembuka yang natural lalu tampilkan setiap data relevan dalam bullet point yang ditulis ulang secara natural, bukan menyalin format label mentah. Contoh format yang benar: '- Seleksi gelombang 1 dilaksanakan pada 12 - 13 Mei 2026.' Jangan menulis format seperti 'Gelombang: ..., Kegiatan: ..., Tanggal: ...'. Jangan mengubah nama, tanggal, angka, atau fakta dari data. Jangan menggabungkan atau menghilangkan item. Jangan menyebutkan informasi di luar data di atas. Jangan meminta user mengulang pertanyaan. Jangan menyebut nama file atau tag internal."""
+    try:
+        response = ollama.chat(model=CHAT_MODEL, messages=[{"role": "user", "content": prompt}])
+        answer = clean_markdown(response["message"]["content"])
+        answer = strip_leaked_internal_tags(answer)
+        answer = _naturalize_answer_items(answer)
+        answer_lower = answer.lower()
+        source_words = {
+            word for item in items for word in re.findall(r"[a-z0-9]+", item.lower())
+            if len(word) >= 4
+        }
+        answer_words = set(re.findall(r"[a-z0-9]+", answer_lower))
+        if any(item.lower() in answer_lower for item in items) or len(source_words & answer_words) >= 3:
+            answer_lines = [line.strip() for line in answer.splitlines() if line.strip()]
+            if answer_lines and all(line.startswith("-") for line in answer_lines):
+                intro = generate_intro_sentence(question, len(items), topic_label, context)
+                answer = intro + "\n" + answer
+            answer_bullets = [line for line in answer.splitlines() if line.strip().startswith("-")]
+            if len(answer_bullets) < len(items):
+                answer = answer.rstrip() + "\n" + "\n".join(items[len(answer_bullets):])
+            return _naturalize_answer_items(answer)
+    except Exception as e:
+        if DEBUG:
+            print(f"[DEBUG] Gagal generate jawaban fokus ({e}), pakai fallback deterministik")
+    intro = generate_intro_sentence(question, len(items), topic_label, context)
+    return intro + "\n" + _naturalize_answer_items("\n".join(items))
+
+
 # ============================================================
 # BAGIAN 5: FUNGSI UTAMA
 # ============================================================
@@ -1107,6 +1219,8 @@ def _detect_topic_label(question: str, category: str) -> str:
     """Mapping label topik yang dipakai untuk kalimat pembuka fallback."""
     q_lower = question.lower()
 
+    if category == "requirements" and any(kw in q_lower for kw in ["perwalian", "krs"]):
+        return "syarat dan ketentuan perwalian/KRS"
     if category == "beasiswa":
         return "jenis beasiswa"
     if category == "ukm":
@@ -1160,6 +1274,24 @@ def ask_minci(question: str) -> str:
     category = _detect_question_category(question)
     hint = find_highlighted_lines(question, context)
     full_context = hint + "\n\n" + context if hint else context
+
+    if category == "general":
+        top_source = get_top_source_from_context(context)
+        context_items = extract_items_from_source(context, top_source)
+        relevant_items = filter_items_for_question(context_items, question)
+        if relevant_items:
+            return generate_focused_answer(question, relevant_items[:15], "informasi yang ditanyakan")
+        response = ollama.chat(
+            model=CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": build_system_prompt()},
+                {"role": "user", "content": f"Konteks:\n{context}\n\nPertanyaan:\n{question}\n\nJawab langsung berdasarkan konteks yang relevan. Jangan meminta user mengulang pertanyaan dan jangan menyebutkan informasi yang tidak ada di konteks."},
+            ],
+            options={"num_predict": 2048},
+        )
+        answer = clean_markdown(response["message"]["content"])
+        return strip_leaked_internal_tags(_naturalize_answer_items(answer))
+
     messages = [
         {"role": "system", "content": build_system_prompt()},
         {"role": "user", "content": build_user_message(question, full_context)},
@@ -1174,6 +1306,7 @@ def ask_minci(question: str) -> str:
     answer = response["message"]["content"]
     answer = clean_markdown(answer)
     answer = strip_leaked_internal_tags(answer)
+    answer = _naturalize_answer_items(answer)
 
     # --- Fallback deterministik: kalau model gagal bikin bullet sama sekali,
     #     atau kalau pertanyaan spesifik seperti 'pra ktmb'/'perwalian'/'gelombang 3'
@@ -1186,7 +1319,15 @@ def ask_minci(question: str) -> str:
 
         top_source = get_top_source_from_context(context)
         context_items = extract_items_from_source(context, top_source)
-        if category == "requirements" and any(kw in q_lower for kw in ["perwalian", "krs"]):
+        if category == "requirements" and not any(kw in q_lower for kw in ["perwalian", "krs"]):
+            requirement_blocks = [
+                block for block in context.split("\n\n---\n\n")
+                if any(marker in block.lower() for marker in ["persyaratan", "syarat dan ketentuan"])
+                and ("pendaftaran" in q_lower or "pmb" in q_lower or "administrasi" in block.lower())
+            ]
+            if requirement_blocks:
+                context_items = extract_items_from_source(requirement_blocks[0], None)
+        elif category == "requirements" and any(kw in q_lower for kw in ["perwalian", "krs"]):
             requirement_blocks = [
                 block for block in context.split("\n\n---\n\n")
                 if "syarat dan ketentuan krs/perwalian" in block.lower()
@@ -1213,7 +1354,7 @@ def ask_minci(question: str) -> str:
             is_ukm = category == "ukm"
             all_context_items = extract_items_from_source(context, top_source)
             should_override_model = (
-                is_about_institution or is_program_study_list or is_program_profile or is_beasiswa or is_ukm or category == "requirements" or
+                is_about_institution or is_program_study_list or is_program_profile or is_beasiswa or is_ukm or category in {"requirements", "biaya"} or
                 category == "calendar_event" or
                 (question_is_specific_event and len(context_items) < len(all_context_items)) or
                 (category == "calendar" and len(context_items) < len(all_context_items)) or
@@ -1231,6 +1372,8 @@ def ask_minci(question: str) -> str:
                         return answer
 
                 topic_label = _detect_topic_label(question, category)
+                if question_is_specific_event or category in {"institution", "requirements", "biaya"}:
+                    return generate_focused_answer(question, context_items[:15], topic_label)
                 intro = generate_intro_sentence(
                     question, len(context_items[:15]), topic_label,
                     "\n".join(context_items[:15]),
