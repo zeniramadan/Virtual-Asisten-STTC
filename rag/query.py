@@ -163,7 +163,6 @@ def normalize_query_text(question: str) -> str:
 
     for word, number in _NUMBER_WORDS.items():
         q = re.sub(rf"\bgelombang\s+{word}\b", f"gelombang {number}", q, flags=re.IGNORECASE)
-        q = re.sub(rf"\bgelombang\s+{word}\b", f"gelombang {number}", q, flags=re.IGNORECASE)
 
     return q
 
@@ -267,6 +266,9 @@ def _detect_preferred_source(question: str) -> str | None:
 _CALENDAR_EVENT_RULES: list[tuple[str, list[str]]] = [
     ("pra ktmb", ["pra ktmb"]),
     ("ktmb", ["ktmb"]),
+    ("hasil seleksi", ["pengumuman hasil seleksi", "pengumuman"]),
+    ("pengumuman", ["pengumuman hasil seleksi", "pengumuman"]),
+    ("seleksi", ["seleksi penerimaan mahasiswa baru", "seleksi penerimaan"]),
     ("perwalian", ["perwalian", "herregistrasi dan perwalian", "perwalian / krs", "herregistrasi dan perwalian / krs"]),
     ("herregistrasi", ["herregistrasi", "herregistrasi dan perwalian", "herregistrasi dan perwalian / krs"]),
     ("kprs", ["kprs", "kartu perubahan rencana studi", "kartu perubahan rencana studi / cuti kuliah"]),
@@ -289,22 +291,23 @@ def _extract_exact_event_terms(question: str) -> list[str]:
     """Ambil kata kunci event spesifik untuk membatasi hasil dari KALENDER.docx."""
     q = _normalize_calendar_question(question)
 
+    event_terms = []
     for phrase, terms in _CALENDAR_EVENT_RULES:
         if phrase in q:
-            return terms
+            event_terms = terms
+            break
 
     if "gelombang" in q:
-        q = re.sub(r"\bgelombang\s+ke[- ]?\s*(\d|satu|dua|tiga|i|ii|iii)\b", r"gelombang \1", q, flags=re.IGNORECASE)
         q = re.sub(r"\bgelombang\s+(?:ke[- ]?)?\s*(\d|satu|dua|tiga|i|ii|iii)\b", r"gelombang \1", q, flags=re.IGNORECASE)
-        terms = []
+        wave_terms = []
         if "gelombang 1" in q or "gelombang satu" in q or "gelombang i" in q:
-            terms += ["gelombang 1", "gelombang satu"]
+            wave_terms += ["gelombang 1", "gelombang satu"]
         if "gelombang 2" in q or "gelombang dua" in q or "gelombang ii" in q:
-            terms += ["gelombang 2", "gelombang dua"]
+            wave_terms += ["gelombang 2", "gelombang dua"]
         if "gelombang 3" in q or "gelombang tiga" in q or "gelombang iii" in q:
-            terms += ["gelombang 3", "gelombang tiga"]
-        return terms
-    return []
+            wave_terms += ["gelombang 3", "gelombang tiga"]
+        return event_terms + wave_terms
+    return event_terms
 
 
 def _get_event_match_label(question: str) -> str | None:
@@ -363,6 +366,8 @@ def retrieve_context(question: str, top_k: int = TOP_K) -> str:
         print("=" * 70)
 
     exact_event_terms = _extract_exact_event_terms(question)
+    wave_terms = [term for term in exact_event_terms if term.startswith("gelombang ")]
+    activity_terms = [term for term in exact_event_terms if not term.startswith("gelombang ")]
     is_about_question = _is_about_institution_question(question)
     context_blocks = []
     for doc, meta, dist in zip(documents, metadatas, distances):
@@ -408,7 +413,13 @@ def retrieve_context(question: str, top_k: int = TOP_K) -> str:
 
         if exact_event_terms and source == top_source:
             doc_lower = doc.lower()
-            if not any(term in doc_lower for term in exact_event_terms):
+            if wave_terms and activity_terms:
+                event_matches = any(term in doc_lower for term in activity_terms)
+                wave_matches = any(term in doc_lower for term in wave_terms)
+                event_matches = event_matches and wave_matches
+            else:
+                event_matches = any(term in doc_lower for term in exact_event_terms)
+            if not event_matches:
                 dipakai = False
                 alasan = f"❌ DIBUANG (event spesifik tidak cocok: {exact_event_terms})"
 
@@ -563,6 +574,69 @@ def _is_about_institution_question(question: str) -> bool:
     return any(kw in q_lower for kw in ["tentang sttc", "tentang kampus", "profil sttc", "profil kampus", "sekilas stt cipasung", "sekilas tentang", "sttc", "kampus sttc"]) and not any(kw in q_lower for kw in ["program studi", "prodi", "jurusan", "biaya", "jadwal", "krs", "kapan"])
 
 
+def _parse_calendar_fields(item: str) -> dict[str, str]:
+    """Ambil field kalender dari satu baris hasil serialisasi tabel."""
+    fields = {}
+    label_patterns = {
+        "gelombang": r"gelombang",
+        "kegiatan": r"kegiatan(?:\s+akademik)?",
+        "tanggal": r"tanggal",
+    }
+    for label, label_pattern in label_patterns.items():
+        match = re.search(
+            rf"{label_pattern}\s*:\s*(.*?)(?=,\s*(?:gelombang|kegiatan(?:\s+akademik)?|tanggal)\s*:|$)",
+            item,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            fields[label] = match.group(1).strip()
+    return fields
+
+
+def _filter_calendar_items_generically(items: list[str], question: str) -> list[str]:
+    """Pilih baris kalender berdasarkan kecocokan field, tanpa daftar event manual."""
+    parsed_items = [(item, _parse_calendar_fields(item)) for item in items]
+    if not any(fields.get("kegiatan") for _, fields in parsed_items):
+        return []
+
+    normalized_question = _normalize_calendar_question(question)
+    wave_terms = [term for term in _extract_exact_event_terms(question) if term.startswith("gelombang ")]
+    candidates = [
+        (item, fields) for item, fields in parsed_items
+        if not wave_terms or any(term in fields.get("gelombang", "").lower() for term in wave_terms)
+    ]
+    if not candidates:
+        return []
+
+    query_terms = re.findall(r"[a-z]+", normalized_question)
+    ignored_terms = {
+        "gelombang", "kapan", "jadwal", "tanggal", "kegiatan", "berapa", "pmb",
+        "yang", "untuk", "di", "ke", "dari", "apa", "saja", "dong", "ya",
+        "nol", "satu", "dua", "tiga", "empat", "lima", "enam", "tujuh",
+        "delapan", "sembilan", "sepuluh",
+    }
+    activity_terms = [term for term in query_terms if term not in ignored_terms]
+    if not activity_terms:
+        return [item for item, _fields in candidates]
+
+    query_phrase = " ".join(activity_terms)
+    scored = []
+    for item, fields in candidates:
+        activity = fields.get("kegiatan", "").lower()
+        overlap = sum(term in activity.split() for term in activity_terms)
+        score = overlap
+        if query_phrase in activity:
+            score += 100
+        if activity.startswith(query_phrase):
+            score += 50
+        scored.append((score, item))
+
+    best_score = max(score for score, _item in scored)
+    if best_score == 0:
+        return []
+    return [item for score, item in scored if score == best_score]
+
+
 def _detect_question_category(question: str) -> str:
     """Klasifikasi topik utama pertanyaan agar routing dan filter konsisten di satu tempat."""
     q_lower = question.lower()
@@ -581,6 +655,8 @@ def _detect_question_category(question: str) -> str:
         return "ukm"
     if _is_procedure_question(question):
         return "krs_procedure"
+    if any(kw in q_lower for kw in ["syarat", "persyaratan"]) and any(kw in q_lower for kw in ["perwalian", "krs"]):
+        return "requirements"
     if _extract_exact_event_terms(question):
         return "calendar_event"
     if any(kw in q_lower for kw in ["biaya", "bayar", "harga", "ukt", "pembayaran", "cicil"]):
@@ -664,10 +740,31 @@ def filter_items_for_question(items: list[str], question: str) -> list[str]:
         if filtered:
             return filtered
 
+    if _detect_question_category(question) == "requirements" and any(kw in q for kw in ["perwalian", "krs"]):
+        filtered = [
+            item for item in items
+            if not any(kw in item.lower() for kw in ["adalah proses", "adalah dokumen"])
+        ]
+        if filtered:
+            return filtered
+
+    generic_calendar_items = _filter_calendar_items_generically(items, question)
+    if generic_calendar_items:
+        return generic_calendar_items
+
     exact_event_terms = _extract_exact_event_terms(question)
     if exact_event_terms:
-        filtered = [item for item in items if any(term in item.lower() for term in exact_event_terms)]
-        if filtered:
+        wave_terms = [term for term in exact_event_terms if term.startswith("gelombang ")]
+        activity_terms = [term for term in exact_event_terms if not term.startswith("gelombang ")]
+        if wave_terms and activity_terms:
+            filtered = [
+                item for item in items
+                if any(term in item.lower() for term in wave_terms)
+                and any(term in item.lower() for term in activity_terms)
+            ]
+        else:
+            filtered = [item for item in items if any(term in item.lower() for term in exact_event_terms)]
+        if filtered and "gelombang" not in q:
             return filtered
 
     topic_keywords = {
@@ -685,7 +782,6 @@ def filter_items_for_question(items: list[str], question: str) -> list[str]:
     if "gelombang" not in q:
         return items
 
-    q = re.sub(r"\bgelombang\s+ke[- ]?\s*(\d|satu|dua|tiga|i|ii|iii)\b", r"gelombang \1", q, flags=re.IGNORECASE)
     q = re.sub(r"\bgelombang\s+(?:ke[- ]?)?\s*(\d|satu|dua|tiga|i|ii|iii)\b", r"gelombang \1", q, flags=re.IGNORECASE)
 
     number_targets = []
@@ -716,10 +812,13 @@ def filter_items_for_question(items: list[str], question: str) -> list[str]:
     }
 
     matched_activity = None
-    for name, keywords in activity_keywords.items():
-        if any(kw in q for kw in keywords):
-            matched_activity = name
-            break
+    if "hasil seleksi" in q or "pengumuman" in q:
+        matched_activity = "pengumuman"
+    else:
+        for name, keywords in activity_keywords.items():
+            if any(kw in q for kw in keywords):
+                matched_activity = name
+                break
 
     if matched_activity is None:
         return filtered
@@ -727,7 +826,10 @@ def filter_items_for_question(items: list[str], question: str) -> list[str]:
     activity_filtered = []
     for item in filtered:
         lower = item.lower()
-        if any(kw in lower for kw in activity_keywords[matched_activity]):
+        is_matching_activity = any(kw in lower for kw in activity_keywords[matched_activity])
+        if matched_activity == "seleksi" and "pengumuman" in lower:
+            is_matching_activity = False
+        if is_matching_activity:
             activity_filtered.append(item)
 
     return activity_filtered if activity_filtered else filtered
@@ -936,11 +1038,11 @@ def strip_leaked_internal_tags(text: str) -> str:
     text = re.sub(r"\[(Sumber|Bagian|Konteks):[^\]]*\]\s*", "", text)
     # Buang penyebutan nama file dokumen kalau kebablasan disebut
     for fname in ["PMB.docx", "KRS.docx", "BIAYA.docx", "KALENDER.docx"]:
-        text = text.replace(fname, "").replace(fname.replace(".docx", ""), "")
+        text = text.replace(fname, "")
     return text.strip()
 
 
-def generate_intro_sentence(question: str, item_count: int, topic_label: str) -> str:
+def generate_intro_sentence(question: str, item_count: int, topic_label: str, context: str = "") -> str:
     """
     Generate SATU/DUA kalimat pembuka yang natural (gaya bicara Minci) buat
     mengantar daftar bullet point, TANPA menyebutkan isi list-nya satu per
@@ -952,8 +1054,10 @@ def generate_intro_sentence(question: str, item_count: int, topic_label: str) ->
     prompt = f"""Kamu adalah Minci, asisten virtual akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan.
 
 Pertanyaan user: "{question}"
+Konteks jawaban yang akan ditampilkan:
+{context}
 
-Tulis kalimat pembuka SINGKAT (1-2 kalimat, BUKAN daftar/list) untuk mengantar jawaban berupa {topic_label} yang berisi {item_count} item. JANGAN sebutkan isi item-nya satu per satu -- daftar itemnya akan ditampilkan TERPISAH setelah kalimat pembukamu. Kalau pertanyaan user diawali sapaan, balas sapaannya dulu di kalimat pembuka ini. JANGAN sebutkan nama file dokumen apapun.
+Tulis kalimat pembuka SINGKAT (1-2 kalimat, BUKAN daftar/list) untuk mengantar jawaban berupa {topic_label} yang berisi {item_count} item. Gunakan konteks dan pertanyaan agar pembuka menyebut topik yang benar. JANGAN sebutkan isi item-nya satu per satu -- daftar itemnya akan ditampilkan TERPISAH setelah kalimat pembukamu. Kalau pertanyaan user diawali sapaan, balas sapaannya dulu di kalimat pembuka ini. JANGAN sebutkan nama file dokumen apapun dan JANGAN menyebut topik lain di luar pertanyaan.
 
 PENTING: Jawab HANYA dengan kalimat pembukanya saja. JANGAN bullet point, JANGAN tanda kutip, JANGAN penjelasan lain."""
 
@@ -1053,6 +1157,7 @@ def ask_minci(question: str) -> str:
             print(f"\n[DEBUG] '{question!r}' tidak ada konteks relevan -> jawaban deterministik tanpa memanggil model Minci.")
         return "Maaf kak, informasi yang Anda tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha."
 
+    category = _detect_question_category(question)
     hint = find_highlighted_lines(question, context)
     full_context = hint + "\n\n" + context if hint else context
     messages = [
@@ -1076,13 +1181,18 @@ def ask_minci(question: str) -> str:
     #     kode yang susun daftar sendiri (dijamin sesuai topik) dan mengesampingkan
     #     model output yang terlalu umum. ---
     q_lower = question.lower()
-    category = _detect_question_category(question)
-
     if context and _is_list_or_detail_question(question, category):
         answer_bullets = [line.strip() for line in answer.split("\n") if line.strip().startswith("-")]
 
         top_source = get_top_source_from_context(context)
         context_items = extract_items_from_source(context, top_source)
+        if category == "requirements" and any(kw in q_lower for kw in ["perwalian", "krs"]):
+            requirement_blocks = [
+                block for block in context.split("\n\n---\n\n")
+                if "syarat dan ketentuan krs/perwalian" in block.lower()
+            ]
+            if requirement_blocks:
+                context_items = extract_items_from_source(requirement_blocks[0], None)
         context_items = filter_items_for_question(context_items, question)
 
         if category == "program_profile":
@@ -1095,15 +1205,18 @@ def ask_minci(question: str) -> str:
                 return answer
 
         if len(context_items) >= 1:
-            question_is_specific_event = any(kw in q_lower for kw in ["gelombang", "perwalian", "herregistrasi", "ktmb", "pra ktmb", "krs", "pengisian"])
+            question_is_specific_event = category == "calendar_event" or any(kw in q_lower for kw in ["gelombang", "perwalian", "herregistrasi", "ktmb", "pra ktmb", "krs", "pengisian"])
             is_program_study_list = category == "program_study"
             is_about_institution = category == "institution"
             is_program_profile = category == "program_profile"
             is_beasiswa = category == "beasiswa"
             is_ukm = category == "ukm"
+            all_context_items = extract_items_from_source(context, top_source)
             should_override_model = (
-                is_about_institution or is_program_study_list or is_program_profile or is_beasiswa or is_ukm or
-                (question_is_specific_event and len(context_items) < len(extract_items_from_source(context, top_source))) or
+                is_about_institution or is_program_study_list or is_program_profile or is_beasiswa or is_ukm or category == "requirements" or
+                category == "calendar_event" or
+                (question_is_specific_event and len(context_items) < len(all_context_items)) or
+                (category == "calendar" and len(context_items) < len(all_context_items)) or
                 len(answer_bullets) == 0
             )
 
@@ -1118,7 +1231,10 @@ def ask_minci(question: str) -> str:
                         return answer
 
                 topic_label = _detect_topic_label(question, category)
-                intro = generate_intro_sentence(question, len(context_items[:15]), topic_label)
+                intro = generate_intro_sentence(
+                    question, len(context_items[:15]), topic_label,
+                    "\n".join(context_items[:15]),
+                )
                 answer = intro + "\n" + "\n".join(context_items[:15])
                 answer = clean_markdown(answer)
                 answer = strip_leaked_internal_tags(answer)
