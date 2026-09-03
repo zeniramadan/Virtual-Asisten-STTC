@@ -1,208 +1,122 @@
 """
-query.py
-========
-Modul inti RAG Minci: menerima pertanyaan user, mencari potongan dokumen paling
-relevan dari ChromaDB (PMB.docx, KRS.docx, BIAYA.docx, KALENDER.docx), lalu
-meminta model "minci" (hasil fine-tuning LoRA) di Ollama untuk menjawab dengan
-gaya bahasanya sendiri, berdasarkan konteks tadi.
-
-Dipanggil oleh webhook WhatsApp (webhook/app.py) & bot Telegram (telegram/tele.py),
-atau bisa dites langsung: python query.py
-
-=====================================================================
-CATATAN DESAIN -- ini rewrite bersih, tapi semua bug yang sudah pernah
-ditemukan & diperbaiki di iterasi-iterasi sebelumnya TETAP ditangani:
-=====================================================================
-1. Embedding pakai bge-m3 (bukan nomic-embed-text) -- jauh lebih akurat untuk
-   Bahasa Indonesia. Tidak butuh prefix instruksi ("search_query:" dsb).
-2. ChromaDB WAJIB pakai metrik cosine (bukan default L2) -- default L2 bikin
-   ranking retrieval kacau/tidak konsisten.
-3. Telemetry ChromaDB dimatikan (anonymized_telemetry=False) -- biar tidak
-   spam "Failed to send telemetry event" di log.
-4. Filter distance (MAX_RELEVANT_DISTANCE) -- buang chunk yang jelas tidak
-   nyambung. Jangan set kelewat ketat (pernah 0.48 -> jawaban benar ikut
-   kebuang kalau pertanyaan user agak typo/berantakan).
-5. Filter dominasi dokumen sumber (SOURCE_DOMINANCE_MARGIN) -- cegah topik
-   dari dokumen berbeda tercampur jadi satu jawaban (misal KRS nyasar pas
-   nanya PMB).
-6. RUTE TOPIK PAKSA (BARU) -- untuk topik yang HARUS selalu dijawab dari 1
-   dokumen tertentu (misal semua pertanyaan jadwal/tanggal WAJIB dari
-   KALENDER.docx), kita override hasil "dokumen top-1 by embedding" dengan
-   dokumen yang sudah ditentukan, supaya konsisten -- tidak tergantung
-   untung-untungan skor embedding.
-7. Ekstraksi list item (buat fallback) HARUS ngerti 2 format: bullet "- item"
-   (dari PMB/KRS) DAN baris hasil serialisasi tabel "Label: nilai, Label2:
-   nilai2" (dari BIAYA/KALENDER yang sekarang tabel asli Word). Dulu cuma
-   ngerti bullet "-", jadi baris tabel kelewat semua.
-8. Ekstraksi list item WAJIB dibatasi ke SATU dokumen sumber saja (top_source
-   / preferred_source) -- dulu ada bug nyata: syarat PMB kecampur baris KRS
-   gara-gara diambil dari SELURUH context tanpa filter sumber.
-9. Guardrail: JANGAN sebutkan nama file dokumen (PMB.docx, KALENDER.docx,
-   dst) ke user -- user tidak perlu tahu urusan internal itu.
-10. Guardrail: JANGAN bocorkan tag internal ([Sumber:], [Konteks:], [Bagian:])
-    ke jawaban -- itu metadata internal buat sistem, bukan buat ditampilkan.
-11. Guardrail: JANGAN markdown (**, ##) -- WhatsApp/Telegram tidak render itu
-    dengan benar. Post-processing clean_markdown() jadi jaring pengaman kode.
-12. Guardrail: JANGAN meringkas/menggabung daftar (biaya per semester, syarat,
-    dst) jadi satu kalimat generik -- WAJIB sebutkan semua item satu-satu.
-    Ada fallback deterministik di kode kalau model tetap gagal comply.
-13. Kalimat pembuka fallback di-GENERATE (bukan template statis) lewat 1 LLM
-    call kecil terpisah -- supaya tidak kedengaran template robotik.
-14. Jangan campur nomor gelombang/semester antar baris berbeda (cek baris
-    sumbernya PERSIS sebelum menjawab).
-15. Bedakan jenis tanggal per kegiatan (Pendaftaran != Seleksi != Pengumuman
-    != Registrasi) -- jangan ambil baris yang salah jenis.
-16. JANGAN menambahkan saran/pengingat yang tidak diminta & tidak ada di
-    konteks (anti-halusinasi "jangan lupa siapkan KRS" dkk).
-17. TIDAK ada memori percakapan (conversation history) -- fitur ini sudah
-    dilepas sebelumnya sesuai permintaan, setiap pertanyaan berdiri sendiri.
-18. CHIT-CHAT EXCEPTION (BARU) -- pesan basa-basi (salam, sapaan, terima
-    kasih, dll, dideteksi dari daftar frasa di chitchat.json) langsung
-    dijawab model TANPA lewat retrieve_context()/RAG sama sekali. Hanya
-    match kalau basa-basinya di AWAL kalimat dan sisanya tidak substansial
-    -- supaya "halo, syarat daftar apa aja?" tetap masuk RAG.
+Pure RAG query.py untuk Minci.
+- Semua pertanyaan akademik melewati retrieval.
+- Routing memilih source ChromaDB.
+- Model SELALU dipanggil, bahkan ketika context kosong.
+- Fallback sepenuhnya di-handle oleh System Prompt Llama 3.2.
 """
 
+from __future__ import annotations
+import json
 import os
 import re
-import json
-import ollama
-import chromadb
+from collections import Counter
 
-# ============================================================
-# KONFIGURASI
-# ============================================================
+import chromadb
+import ollama
+
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHROMA_DB_DIR = os.path.join(BASE_DIR, "database", "chroma_db")
 COLLECTION_NAME = "minci_dokumen"
 
-CHITCHAT_PATH = os.path.join(BASE_DIR, "..", "dataset", "chitchat.json")
-
 EMBED_MODEL = "bge-m3"
-EMBED_QUERY_PREFIX = ""       # bge-m3 tidak butuh prefix instruksi khusus
+CHAT_MODEL = "llama3.2"
 
-CHAT_MODEL = "minci"
+RETRIEVAL_K = 20
+FINAL_CONTEXT_K = 8
+MAX_DISTANCE = 0.60
+ROUTED_MAX_DISTANCE = 0.58
+DEBUG = True
 
-TOP_K = 10                     # jumlah kandidat chunk yang diambil dari ChromaDB
-DEBUG = True                  # tampilkan proses retrieval & routing di terminal
-USE_CHITCHAT = True           # aktifkan lagi pengecualian chit-chat seperti alur awal
+# Variabel FALLBACK manual dihapus karena sekarang diserahkan ke model
 
-MAX_RELEVANT_DISTANCE = 0.62  # ambang distance (cosine) -- di atas ini dianggap
-                               # tidak nyambung & dibuang. JANGAN diturunkan terlalu
-                               # jauh (pernah 0.48 -> jawaban benar ikut kebuang
-                               # kalau pertanyaan user agak typo/berantakan).
-
-SOURCE_DOMINANCE_MARGIN = 0.05  # chunk dari dokumen LAIN (beda dari dokumen topik
-                               # utama) tetap dipakai KALAU distance-nya masih deket
-                               # (selisih <= ini) sama chunk terbaik dari dokumen topik
-                               # utama. Kalau lebih jauh, dibuang APAPUN angka distance-nya.
-
-# --------------------------------------------------------------------
-# RUTE TOPIK PAKSA: kata kunci -> nama file dokumen yang WAJIB dipakai.
-# Kalau pertanyaan match salah satu grup ini, dan dokumen itu memang muncul
-# di antara hasil retrieval (walau bukan rangking #1), dokumen itu dipaksa
-# jadi "topik utama" -- TIDAK peduli dokumen mana yang skor embedding-nya
-# paling dekat. Ini penting untuk konsistensi: semua pertanyaan jadwal/tanggal
-# HARUS selalu dari KALENDER.docx, bukan kadang KALENDER kadang KRS/PMB
-# tergantung untung-untungan skor embedding.
-#
-# Urutan penting: dicek dari atas ke bawah, yang pertama match dipakai.
-# --------------------------------------------------------------------
-PREFERRED_SOURCE_KEYWORDS: list[tuple[list[str], str]] = [
-    (["jadwal", "tanggal", "kalender", "kapan", "gelombang"], "KALENDER.docx"),
-    (["biaya", "bayar", "nominal", "harga", "ukt", "pembayaran", "cicil"], "BIAYA.docx"),
-    (["beasiswa", "jenis beasiswa", "fasilitas beasiswa", "kuota beasiswa", "beasiswa apa"], "PMB.docx"),
-    (["program studi", "prodi", "jurusan", "program studi apa", "ada prodi"], "PMB.docx"),
-]
 
 # ============================================================
-# INISIALISASI CHROMADB
+# CHROMADB
 # ============================================================
+
 _client = chromadb.PersistentClient(
     path=CHROMA_DB_DIR,
     settings=chromadb.config.Settings(anonymized_telemetry=False),
 )
-# PENTING: metadata cosine ini harus SAMA PERSIS dengan yang dipakai ingest.py.
-# Kalau collection sudah pernah dibuat dengan metrik lain, metadata di sini
-# TIDAK mengubahnya -- WAJIB ingest ulang dari nol kalau ganti metrik.
+
 _collection = _client.get_or_create_collection(
     COLLECTION_NAME,
     metadata={"hnsw:space": "cosine"},
 )
 
-_count = _collection.count()
-if _count == 0:
-    print(f"⚠️  PERINGATAN: collection '{COLLECTION_NAME}' di {CHROMA_DB_DIR} KOSONG (0 chunk).")
-    print("   Jalankan dulu: python ingest.py (pastikan ada file .docx di folder documents/)")
-else:
-    print(f"✅ ChromaDB terbaca: {_count} chunk siap dipakai (dari {CHROMA_DB_DIR})")
+if DEBUG:
+    print(
+        f"[RAG] collection={COLLECTION_NAME} | "
+        f"chunks={_collection.count()} | embedding={EMBED_MODEL} | "
+        f"chat_model={CHAT_MODEL}"
+    )
 
 
 # ============================================================
-# BAGIAN 0: NORMALISASI QUERY (bahasa natural -> bentuk yang cocok dengan dokumen)
+# NORMALISASI RINGAN
 # ============================================================
-# Query pengguna sering pakai kata seperti "gelombang satu" atau "gelombang dua"
-# sedangkan dokumen menyimpan data sebagai "Gelombang 1", "Gelombang 2".
-# Tanpa normalisasi, embedding bisa sedikit kurang cocok walau konteks sebenarnya
-# sudah ada. Ini fix ringan tapi berdampak besar untuk pertanyaan seperti:
-# "hasil seleksi gelombang satu kapan?"
 
 _NUMBER_WORDS = {
     "nol": "0", "satu": "1", "dua": "2", "tiga": "3", "empat": "4",
-    "lima": "5", "enam": "6", "tujuh": "7", "delapan": "8", "sembilan": "9",
-    "sepuluh": "10",
+    "lima": "5", "enam": "6", "tujuh": "7", "delapan": "8",
+    "sembilan": "9", "sepuluh": "10",
 }
 
+_ABBREVIATION_ALIASES = (
+    (r"\bp\s*\.?\s*m\s*\.?\s*b\s*\.?\b", "PMB penerimaan mahasiswa baru"),
+    (r"\bk\s*\.?\s*r\s*\.?\s\s*\.?\b", "KRS kartu rencana studi"),
+    (r"\bp\s*\.?\s*r\s*\.?\s*o\s*\.?\s*d\s*\.?\s*i\s*\.?\b", "PRODI program studi"),
+    (r"\bu\s*\.??\s*k\s*\.??\s*m\s*\.??\b", "UKM unit kegiatan mahasiswa"),
+    (r"\bk\s*\.??\s*p\s*\.??\s*r\s*\.??\s*s\s*\.??\b", "KPRS kartu perubahan rencana studi"),
+)
 
-def normalize_query_text(question: str) -> str:
-    """Normalisasi bentuk natural-language agar lebih cocok dengan entri dokumen."""
-    q = question.strip()
-    q = q.replace("Gelombang I", "Gelombang 1").replace("gelombang i", "gelombang 1")
-    q = q.replace("Gelombang II", "Gelombang 2").replace("gelombang ii", "gelombang 2")
-    q = q.replace("Gelombang III", "Gelombang 3").replace("gelombang iii", "gelombang 3")
+
+def normalize_abbreviations(text: str) -> str:
+    for pattern, replacement in _ABBREVIATION_ALIASES:
+        text = re.sub(pattern, replacement, text, flags=re.I)
+    return text
+
+
+def normalize_query(question: str) -> str:
+    q = str(question or "").strip()
+    q = re.sub(r"\s+", " ", q)
+    q = normalize_abbreviations(q)
+    q = re.sub(r"\s+", " ", q).strip()
+
+    q = re.sub(r"\bgelombang\s+i\b", "gelombang 1", q, flags=re.I)
+    q = re.sub(r"\bgelombang\s+ii\b", "gelombang 2", q, flags=re.I)
+    q = re.sub(r"\bgelombang\s+iii\b", "gelombang 3", q, flags=re.I)
 
     for word, number in _NUMBER_WORDS.items():
-        q = re.sub(rf"\bgelombang\s+{word}\b", f"gelombang {number}", q, flags=re.IGNORECASE)
+        q = re.sub(
+            rf"\bgelombang\s+(?:ke[- ]?)?{word}\b",
+            f"gelombang {number}",
+            q,
+            flags=re.I,
+        )
 
     return q
 
 
 # ============================================================
-# BAGIAN 0: CHIT-CHAT (basa-basi) -- pengecualian, TANPA RAG
+# CHITCHAT DETECTION (basa-basi → skip RAG)
 # ============================================================
-# Kalau pertanyaan user cuma basa-basi (salam, sapaan, ucapan terima
-# kasih, dll), langsung dijawab oleh model TANPA lewat retrieve_context()
-# sama sekali -- tidak ada embedding, tidak ada query ke ChromaDB. Selain
-# lebih cepat, ini juga mencegah RAG "maksa" nyari konteks dokumen buat
-# pertanyaan yang sebenarnya tidak butuh info akademik apapun.
-#
-# Daftar frasanya disimpan di file JSON terpisah (chitchat.json) supaya
-# gampang ditambah/diedit tanpa utak-atik kode.
-#
-# PENTING: deteksinya HANYA match kalau basa-basinya ada di AWAL kalimat
-# DAN sisa kalimat setelah itu memang tidak substansial (<= 3 kata, atau
-# tidak ada kata tanya) -- supaya pesan seperti "halo min, syarat daftar
-# apa aja?" TETAP masuk RAG (karena ada pertanyaan sungguhan di
-# belakangnya), bukan ke jalur chit-chat.
+
+CHITCHAT_PATH = os.path.join(BASE_DIR, "..", "dataset", "chitchat.json")
+
 
 def _load_chitchat_phrases() -> list[str]:
     """Baca semua frasa chit-chat dari chitchat.json jadi satu list flat."""
     try:
         with open(CHITCHAT_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except FileNotFoundError:
-        print(f"⚠️  PERINGATAN: {CHITCHAT_PATH} tidak ditemukan -- fitur chit-chat nonaktif.")
+    except (FileNotFoundError, json.JSONDecodeError):
         return []
-    except json.JSONDecodeError as e:
-        print(f"⚠️  PERINGATAN: {CHITCHAT_PATH} isinya bukan JSON valid ({e}) -- fitur chit-chat nonaktif.")
-        return []
-
     phrases = []
-    for kategori, daftar in data.items():
+    for _kategori, daftar in data.items():
         phrases.extend(daftar)
-
-    # frasa yang lebih panjang dicek duluan, supaya "selamat pagi" match
-    # duluan daripada cuma "pagi" (potongan dari frasa yang lebih panjang)
     phrases.sort(key=len, reverse=True)
     return phrases
 
@@ -210,1186 +124,406 @@ def _load_chitchat_phrases() -> list[str]:
 _CHITCHAT_PHRASES = _load_chitchat_phrases()
 
 if DEBUG:
-    print(f"💬 Chit-chat: {len(_CHITCHAT_PHRASES)} frasa dimuat dari {CHITCHAT_PATH}")
+    print(f"[CHITCHAT] {len(_CHITCHAT_PHRASES)} frasa dimuat")
 
 
 def is_chitchat(question: str) -> bool:
-    """
-    True kalau pertanyaan terdeteksi cuma basa-basi di awal DAN tidak ada
-    substansi pertanyaan sungguhan di belakangnya.
-    """
+    """True kalau pertanyaan cuma basa-basi tanpa substansi akademik."""
     if not _CHITCHAT_PHRASES:
         return False
-
     q = question.lower().strip()
     q = re.sub(r"\s+", " ", q)
-    q = re.sub(r"[!?.,]+$", "", q)  # buang tanda baca di ujung
-
+    q = re.sub(r"[!?.,]+$", "", q)
     for phrase in _CHITCHAT_PHRASES:
         if q == phrase:
             return True
         if q.startswith(phrase + " ") or q.startswith(phrase + ","):
             remainder = q[len(phrase):].strip(" ,.-")
-            # sisa kalimat pendek (<=3 kata) dianggap masih bagian dari
-            # basa-basi (mis. "halo kak", "makasih banyak ya"), bukan
-            # pertanyaan sungguhan
             if len(remainder.split()) <= 3:
                 return True
-
     return False
 
 
-def build_chitchat_system_prompt() -> str:
-    """
-    System prompt ringan khusus basa-basi -- sengaja jauh lebih pendek
-    dari build_system_prompt() karena tidak butuh aturan seputar konteks
-    dokumen/RAG sama sekali.
-    """
-    return """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan.
+CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan.
 
-Ini pesan basa-basi (sapaan/ucapan terima kasih/obrolan ringan), BUKAN pertanyaan akademik. Balas SINGKAT (1-2 kalimat) dan natural sesuai basa-basinya. Kalau relevan, tutup dengan menawarkan bantuan seputar PMB/KRS/biaya/jadwal akademik. JANGAN mengarang info akademik apapun di sini."""
+Ini pesan basa-basi (sapaan/ucapan terima kasih/obrolan ringan), BUKAN pertanyaan akademik.
+Balas SINGKAT (1-2 kalimat) dan natural sesuai basa-basinya.
+- Jika sapaan ("halo", "selamat pagi"), balas sapaannya lalu tawarkan bantuan seputar PMB, KRS, atau biaya.
+- Jika salam ("assalamualaikum"), balas "Waalaikumsalam kak!" lalu tawarkan bantuan.
+- Jika ucapan terima kasih ("makasih"), balas "Sama-sama kak!" atau sejenisnya.
+- Jika pertanyaan tidak spesifik ("mau nanya", "ingin bertanya"), jawab "Boleh kak! Silakan tanyakan lebih spesifik mengenai PMB, KRS, biaya, atau jadwal ya!"
+- Gunakan kata "kak" atau "kakak", JANGAN gunakan kata "Kamu" untuk memanggil pengguna.
+JANGAN mengarang info akademik apapun di sini."""
 
 
 # ============================================================
-# BAGIAN 1: RETRIEVAL (cari dokumen relevan + filter)
+# ROUTING
 # ============================================================
 
-def _detect_preferred_source(question: str) -> str | None:
-    """Cek apakah pertanyaan match salah satu rute topik paksa (lihat PREFERRED_SOURCE_KEYWORDS)."""
-    q_lower = question.lower()
-    for keywords, source_name in PREFERRED_SOURCE_KEYWORDS:
-        if any(kw in q_lower for kw in keywords):
-            return source_name
-    return None
-
-
-_CALENDAR_EVENT_RULES: list[tuple[str, list[str]]] = [
-    ("pra ktmb", ["pra ktmb"]),
-    ("ktmb", ["ktmb"]),
-    ("hasil seleksi", ["pengumuman hasil seleksi", "pengumuman"]),
-    ("pengumuman", ["pengumuman hasil seleksi", "pengumuman"]),
-    ("seleksi", ["seleksi penerimaan mahasiswa baru", "seleksi penerimaan"]),
-    ("perwalian", ["perwalian", "herregistrasi dan perwalian", "perwalian / krs", "herregistrasi dan perwalian / krs"]),
-    ("herregistrasi", ["herregistrasi", "herregistrasi dan perwalian", "herregistrasi dan perwalian / krs"]),
-    ("kprs", ["kprs", "kartu perubahan rencana studi", "kartu perubahan rencana studi / cuti kuliah"]),
-    ("cuti kuliah", ["cuti kuliah", "kartu perubahan rencana studi", "kartu perubahan rencana studi / cuti kuliah"]),
-    ("uas", ["uas"]),
-    ("uts", ["uts"]),
+ROUTES = [
+    ("BIAYA.docx", [
+        "biaya", "berapa bayar", "berapa biaya", "nominal", "harga kuliah",
+        "uang kuliah", "ukt", "pembayaran", "bayar", "cicilan", "cicil",
+        "biaya pendaftaran", "biaya registrasi",
+    ]),
+    ("KALENDER.docx", [
+        "jadwal", "tanggal", "tanggal pmb", "tanggal penerimaan", "kalender", "kapan", "gelombang",
+        "pra ktmb", "ktmb", "hasil seleksi", "pengumuman", "seleksi",
+        "perwalian", "herregistrasi", "kprs", "cuti kuliah", "uts", "uas",
+    ]),
+    ("KRS.docx", [
+        "krs", "kartu rencana studi", "pengisian krs", "isi krs", "syarat krs",
+        "mengisi krs", "cara krs", "tata cara krs", "prosedur krs", "syarat perwalian",
+        "perwalian online", "rencana studi", "mata kuliah", "perwalian",
+    ]),
+    ("PMB.docx", [
+        "pmb", "penerimaan mahasiswa baru", "mahasiswa baru",
+        "calon mahasiswa", "pendaftaran", "mendaftar", "daftar kuliah",
+        "syarat masuk", "syarat pendaftaran", "persyaratan masuk", "jalur masuk",
+        "program studi", "prodi", "jurusan", "beasiswa", "ukm",
+        "unit kegiatan mahasiswa", "profil kampus", "tentang kampus",
+        "tentang stt cipasung",
+    ]),
 ]
 
 
-def _normalize_calendar_question(question: str) -> str:
-    """Normalisasi deskriptif agar matching event jadi lebih konsisten."""
-    q = question.lower().strip()
-    q = re.sub(r"\b(kapan|jadwal|tanggal|kegiatan|saat|ketika|berapa)\b", " ", q)
-    q = re.sub(r"[^a-z0-9\s/\-]", " ", q)
-    q = re.sub(r"\s+", " ", q).strip()
-    return q
+def _route_text(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
-def _extract_exact_event_terms(question: str) -> list[str]:
-    """Ambil kata kunci event spesifik untuk membatasi hasil dari KALENDER.docx."""
-    q = _normalize_calendar_question(question)
+def detect_route(question: str) -> tuple[str | None, str]:
+    q = _route_text(normalize_query(question))
 
-    event_terms = []
-    for phrase, terms in _CALENDAR_EVENT_RULES:
-        if phrase in q:
-            event_terms = terms
-            break
+    words = set(q.split())
+    requirement_words = {"syarat", "persyaratan", "dokumen", "berkas"}
+    krs_words = {"krs", "perwalian"}
+    registration_words = {
+        "pendaftaran", "mendaftar", "daftar", "pmb", "masuk",
+        "calon", "mahasiswa",
+    }
 
-    if "gelombang" in q:
-        q = re.sub(r"\bgelombang\s+(?:ke[- ]?)?\s*(\d|satu|dua|tiga|i|ii|iii)\b", r"gelombang \1", q, flags=re.IGNORECASE)
-        wave_terms = []
-        if "gelombang 1" in q or "gelombang satu" in q or "gelombang i" in q:
-            wave_terms += ["gelombang 1", "gelombang satu"]
-        if "gelombang 2" in q or "gelombang dua" in q or "gelombang ii" in q:
-            wave_terms += ["gelombang 2", "gelombang dua"]
-        if "gelombang 3" in q or "gelombang tiga" in q or "gelombang iii" in q:
-            wave_terms += ["gelombang 3", "gelombang tiga"]
-        return event_terms + wave_terms
-    return event_terms
+    if words & requirement_words and words & krs_words:
+        return "KRS.docx", "prioritas syarat KRS/perwalian"
+
+    if words & requirement_words and words & registration_words:
+        return "PMB.docx", "prioritas syarat pendaftaran PMB"
+
+    # PRIORITAS KATA TANYA WAKTU: "kapan"/"tanggal"/"jadwal" HARUS menang
+    # duluan, sebelum scoring keyword biasa. Kenapa ini perlu: normalize_abbreviations()
+    # mengubah "pmb" jadi "PMB penerimaan mahasiswa baru" -- akibatnya frasa panjang
+    # ini ikut disisipkan ke teks query dan mendominasi skor Counter di bawah
+    # (bobotnya = jumlah kata di frasa, jadi "penerimaan mahasiswa baru" dapat
+    # bobot 3, sementara "kapan" cuma bobot 1). Tanpa aturan ini, pertanyaan
+    # "kapan pmb dibuka" selalu di-route paksa ke PMB.docx dan KALENDER.docx
+    # (tempat tanggal/jadwal sebenarnya disimpan) tidak pernah ikut dicari sama
+    # sekali karena routing pakai hard where-filter.
+    time_words = {"kapan", "tanggal", "jadwal"}
+    if words & time_words:
+        return "KALENDER.docx", "prioritas kata tanya waktu (kapan/tanggal/jadwal)"
+
+    scores = Counter()
+    matches = {}
+
+    for source, keywords in ROUTES:
+        for keyword in keywords:
+            k = _route_text(keyword)
+            if re.search(rf"(?<!\w){re.escape(k)}(?!\w)", q):
+                weight = max(1, len(k.split()))
+                scores[source] += weight
+                matches.setdefault(source, []).append(keyword)
+
+    if not scores:
+        return None, "tidak ada keyword routing"
+
+    ranked = scores.most_common()
+    best_source, best_score = ranked[0]
+
+    if len(ranked) == 1:
+        return best_source, f"keyword={matches[best_source]}"
+
+    second_score = ranked[1][1]
+
+    if best_score >= second_score + 2:
+        return best_source, f"keyword={matches[best_source]}"
+
+    if words & {"biaya", "bayar", "nominal", "ukt", "harga"}:
+        return "BIAYA.docx", "prioritas biaya/pembayaran"
+
+    if words & {"jadwal", "tanggal", "kapan", "kalender", "gelombang"}:
+        return "KALENDER.docx", "prioritas jadwal/tanggal"
+
+    if "krs" in words or "perwalian" in words:
+        return "KRS.docx", "prioritas KRS/perwalian"
+
+    if words & {"pmb", "pendaftaran", "prodi", "jurusan", "beasiswa"}:
+        return "PMB.docx", "prioritas PMB/pendaftaran"
+
+    return None, "routing ambigu -> retrieval global"
 
 
-def _get_event_match_label(question: str) -> str | None:
-    """Balik label event paling dekat dengan pertanyaan agar instruksi prompt bisa ditulis secara generik."""
-    q = _normalize_calendar_question(question)
-    for phrase, _terms in _CALENDAR_EVENT_RULES:
-        if phrase in q:
-            return phrase
-    if "gelombang" in q:
-        return "gelombang"
-    return None
+# ============================================================
+# RETRIEVAL GATE
+# ============================================================
+
+_STOPWORDS = {
+    "yang", "dan", "atau", "di", "ke", "dari", "untuk", "dengan",
+    "ini", "itu", "ada", "apa", "apakah", "bagaimana", "berapa",
+    "kapan", "dimana", "mana", "saja", "aja", "dong", "deh", "sih",
+    "ya", "nih", "kak", "min", "minci", "tolong", "mohon", "bisa",
+    "gak", "nggak", "enggak", "tidak", "tau", "tahu", "stt",
+    "cipasung", "kampus", "informasi", "nya",
+}
 
 
-def retrieve_context(question: str, top_k: int = TOP_K) -> str:
-    """Cari potongan dokumen paling relevan dengan pertanyaan user, sudah difilter."""
-    query_embedding = ollama.embeddings(
-        model=EMBED_MODEL, prompt=f"{EMBED_QUERY_PREFIX}{question}"
+def meaningful_tokens(text: str) -> set[str]:
+    text = normalize_abbreviations(text)
+    return {
+        x for x in re.findall(r"[a-z0-9]+", text.lower())
+        if len(x) >= 3 and x not in _STOPWORDS
+    }
+
+
+def lexical_overlap(question: str, document: str) -> int:
+    return len(meaningful_tokens(question) & meaningful_tokens(document))
+
+
+def retrieve(question: str, route_source: str | None) -> list[dict]:
+    embedding = ollama.embeddings(
+        model=EMBED_MODEL,
+        prompt=question,
     )["embedding"]
 
-    results = _collection.query(query_embeddings=[query_embedding], n_results=top_k)
+    kwargs = {
+        "query_embeddings": [embedding],
+        "n_results": RETRIEVAL_K,
+    }
+
+    if route_source:
+        kwargs["where"] = {"source": route_source}
+
+    results = _collection.query(**kwargs)
 
     documents = results.get("documents", [[]])[0]
     metadatas = results.get("metadatas", [[]])[0]
     distances = results.get("distances", [[]])[0]
+    ids = results.get("ids", [[]])[0]
 
     if not documents:
-        if DEBUG:
-            print(f"\n🔍 [DEBUG] Retrieval untuk {question!r}: KOSONG, tidak ada chunk ditemukan.")
-        return ""
-
-    # --- Tentukan "dokumen topik utama" ---
-    # Default: dokumen dari hasil top-1 (paling dekat secara embedding).
-    # Tapi kalau pertanyaan match rute topik paksa DAN dokumen itu memang ada
-    # di antara hasil retrieval, dokumen itu MENANG (override top-1 embedding).
-    embedding_top_source = metadatas[0].get("source")
-    embedding_best_distance = distances[0]
-
-    preferred_source = _detect_preferred_source(question)
-    top_source = embedding_top_source
-    best_distance = embedding_best_distance
-    routing_note = "dari top-1 embedding"
-
-    if preferred_source:
-        preferred_distances = [
-            d for d, m in zip(distances, metadatas) if m.get("source") == preferred_source
-        ]
-        if preferred_distances:
-            top_source = preferred_source
-            best_distance = min(preferred_distances)
-            routing_note = f"DIPAKSA rute topik ke '{preferred_source}' (override top-1 embedding: {embedding_top_source})"
-
-    if DEBUG:
-        print("\n" + "=" * 70)
-        print(f"🔍 [DEBUG] Retrieval untuk: {question!r}")
-        print(f"    Dokumen topik utama: {top_source}  ({routing_note})")
-        print("=" * 70)
-
-    exact_event_terms = _extract_exact_event_terms(question)
-    wave_terms = [term for term in exact_event_terms if term.startswith("gelombang ")]
-    activity_terms = [term for term in exact_event_terms if not term.startswith("gelombang ")]
-    is_about_question = _is_about_institution_question(question)
-    context_blocks = []
-    for doc, meta, dist in zip(documents, metadatas, distances):
-        source = meta.get("source", "dokumen")
-        dipakai = True
-        alasan = "✅ DIPAKAI"
-
-        if dist > MAX_RELEVANT_DISTANCE:
-            dipakai = False
-            alasan = "❌ DIBUANG (distance di atas ambang absolut)"
-        elif source != top_source:
-            if preferred_source:
-                # Rute topik PAKSA aktif -> TIDAK ADA toleransi jarak sama sekali,
-                # WAJIB persis dari dokumen yang dipaksa. Kalau pakai toleransi
-                # margin di sini, dokumen lain yang kebetulan distance-nya LEBIH
-                # KECIL dari dokumen yang dipaksa bisa lolos filter (bug yang
-                # sempat kejadian) -- makanya di jalur rute paksa harus tegas.
-                dipakai = False
-                alasan = f"❌ DIBUANG (rute topik dipaksa ke '{top_source}', dokumen '{source}' tidak dipakai sama sekali)"
-            elif dist > best_distance + SOURCE_DOMINANCE_MARGIN:
-                dipakai = False
-                alasan = f"❌ DIBUANG (dokumen '{source}' beda dari topik utama '{top_source}')"
-
-        if is_about_question:
-            doc_lower = doc.lower()
-            profile_markers = [
-                "sekilas tentang stt cipasung",
-                "didirikan pada tahun 1997",
-                "berbasis lingkungan pesantren",
-                "institusi:",
-                "alamat:",
-                "telepon:",
-                "email:",
-                "website:",
-                "pusat informasi",
-                "jejaring dan kerjasama",
-                "kerjasama dengan industri",
-                "sekolah tinggi teknologi cipasung",
-            ]
-            if not any(marker in doc_lower for marker in profile_markers):
-                dipakai = False
-                alasan = "❌ DIBUANG (bukan blok profil institusi yang relevan untuk pertanyaan tentang kampus)"
-
-        if exact_event_terms and source == top_source:
-            doc_lower = doc.lower()
-            if wave_terms and activity_terms:
-                event_matches = any(term in doc_lower for term in activity_terms)
-                wave_matches = any(term in doc_lower for term in wave_terms)
-                event_matches = event_matches and wave_matches
-            else:
-                event_matches = any(term in doc_lower for term in exact_event_terms)
-            if not event_matches:
-                dipakai = False
-                alasan = f"❌ DIBUANG (event spesifik tidak cocok: {exact_event_terms})"
-
-        if DEBUG:
-            print(f"(distance={dist:.4f}, sumber={source}) {alasan}")
-            print(doc[:250], "..." if len(doc) > 250 else "")
-            print()
-
-        if dipakai:
-            context_blocks.append(f"[Sumber: {source}]\n{doc}")
-
-    if DEBUG:
-        print("=" * 70 + "\n")
-
-    return "\n\n---\n\n".join(context_blocks)
-
-
-def get_top_source_from_context(context: str) -> str | None:
-    """Ambil nama dokumen sumber dari blok PERTAMA di context (= yang paling relevan)."""
-    if not context:
-        return None
-    first_block = context.split("\n\n---\n\n")[0]
-    first_line = first_block.split("\n")[0] if first_block else ""
-    if first_line.startswith("[Sumber:"):
-        return first_line.replace("[Sumber:", "").replace("]", "").strip()
-    return None
-
-
-# ============================================================
-# BAGIAN 2: EKSTRAKSI LIST ITEM (buat highlight & fallback)
-# Harus ngerti 2 format konten: bullet "- item" (PMB/KRS) DAN baris hasil
-# serialisasi tabel "Label: nilai, Label2: nilai2" (BIAYA/KALENDER).
-# ============================================================
-
-_TAG_PREFIX_RE = re.compile(r"^\[(Sumber|Bagian|Konteks):[^\]]*\]\s*")
-
-
-def _strip_internal_tags(line: str) -> str:
-    """Buang tag internal '[Sumber: ...]'/'[Bagian: ...]'/'[Konteks: ...]' dari depan baris."""
-    return _TAG_PREFIX_RE.sub("", line).strip()
-
-
-def _is_list_item_line(raw_line: str) -> bool:
-    """
-    Cek apakah baris ini "item list" yang layak ditampilkan -- entah bullet
-    biasa ("- item") ATAU baris hasil serialisasi tabel ("Label: nilai, ...").
-    """
-    line = raw_line.strip()
-    if not line or line.startswith("##"):
-        return False
-
-    content = _strip_internal_tags(line)
-    if not content:
-        return False
-
-    if content.startswith("- "):
-        return True
-
-    # Baris tabel: minimal ada satu pola "Label: nilai" di dalamnya
-    return ": " in content and len(content) > 3
-
-
-def _format_list_item(raw_line: str) -> str:
-    """Bersihkan tag internal dari satu baris item, pastikan tampil rapi sebagai bullet."""
-    content = _strip_internal_tags(raw_line.strip())
-    if content.startswith("- "):
-        return content
-    return f"- {content}"
-
-
-def extract_items_from_source(context: str, source: str | None) -> list[str]:
-    """
-    Ambil semua "item list" (bullet ATAU baris tabel) dari 'context', dibatasi
-    HANYA dari blok dokumen yang sumbernya SAMA PERSIS dengan 'source'.
-
-    Kenapa dibatasi per-dokumen: context bisa berisi campuran blok dari BEBERAPA
-    dokumen sekaligus. Tanpa filter ini, daftar hasil bisa kecampur 2 topik
-    berbeda (misal syarat PMB kecampur baris prosedur KRS).
-    """
-    if not context:
         return []
 
-    blocks = context.split("\n\n---\n\n") if source else [context]
-    items = []
-    for block in blocks:
-        lines = block.split("\n")
-        if not lines:
+    threshold = ROUTED_MAX_DISTANCE if route_source else MAX_DISTANCE
+    q_tokens = meaningful_tokens(question)
+    candidates = []
+
+    for doc_id, document, metadata, distance in zip(
+        ids, documents, metadatas, distances
+    ):
+        if not document:
             continue
-        if source:
-            if not lines[0].startswith("[Sumber:"):
-                continue
-            block_source = lines[0].replace("[Sumber:", "").replace("]", "").strip()
-            if block_source != source:
-                continue
-            content_lines = lines[1:]
-        else:
-            content_lines = lines
 
-        for line in content_lines:
-            if _is_list_item_line(line):
-                items.append(_format_list_item(line))
+        distance = float(distance)
+        overlap = lexical_overlap(question, document)
 
-    return items
+        if distance > threshold:
+            continue
 
+        if len(q_tokens) >= 2 and overlap < 1:
+            continue
 
-def _is_program_study_question(question: str) -> bool:
-    """Cek apakah pertanyaan menanyakan daftar program studi / jurusan kampus."""
-    q_lower = question.lower()
-    return any(kw in q_lower for kw in ["program studi", "prodi", "jurusan", "ada prodi", "ada jurusan", "program studi apa"])
+        candidates.append({
+            "id": doc_id,
+            "document": document,
+            "metadata": metadata or {},
+            "distance": distance,
+            "overlap": overlap,
+        })
 
+    candidates.sort(key=lambda x: (x["distance"], -x["overlap"]))
 
-def _is_beasiswa_question(question: str) -> bool:
-    """Cek apakah pertanyaan menanyakan jenis/fasilitas beasiswa."""
-    q_lower = question.lower()
-    return any(kw in q_lower for kw in [
-        "beasiswa", "jenis beasiswa", "fasilitas beasiswa", "ada beasiswa", "beasiswa apa", "program beasiswa"
-    ])
-
-
-def _is_ukm_question(question: str) -> bool:
-    """Cek apakah pertanyaan menanyakan UKM / unit kegiatan mahasiswa."""
-    q_lower = question.lower()
-    return any(kw in q_lower for kw in [
-        "ukm", "unit kegiatan mahasiswa", "kegiatan mahasiswa",
-        "ukm apa", "ada ukm", "ukm di kampus", "ukm apa saja",
-        "apa saja ukm", "ukm di sttc", "ukm kampus", "info ukm",
-        "ukm ada apa", "ukm ada apa aja", "daftar ukm"
-    ])
-
-
-def _is_program_profile_question(question: str) -> bool:
-    """Cek apakah pertanyaan menanyakan profil/deskripsi program studi seperti 'tentang informatika'."""
-    q_lower = question.lower()
-    return (
-        ("tentang" in q_lower and ("informatika" in q_lower or "teknik industri" in q_lower or "prodi" in q_lower or "program studi" in q_lower))
-        or any(kw in q_lower for kw in [
-            "tentang informatika",
-            "profil informatika",
-            "profil prodi informatika",
-            "tentang teknik industri",
-            "profil teknik industri",
-            "profil prodi teknik industri",
-            "tentang prodi informatika",
-            "tentang prodi teknik industri",
-        ])
-    )
-
-
-def _is_about_institution_question(question: str) -> bool:
-    """Cek apakah pertanyaan menanyakan profil/sekilas kampus / tentang STTC."""
-    q_lower = question.lower()
-    institution_keywords = ["tentang sttc", "tentang kampus", "profil sttc", "profil kampus", "sekilas stt cipasung", "sekilas tentang", "sttc", "kampus sttc"]
-    return any(kw in q_lower for kw in institution_keywords) and not any(kw in q_lower for kw in ["program studi", "prodi", "jurusan", "biaya", "jadwal", "krs", "kapan"])
-
-
-def _parse_calendar_fields(item: str) -> dict[str, str]:
-    """Ambil field kalender dari satu baris hasil serialisasi tabel."""
-    fields = {}
-    label_patterns = {
-        "gelombang": r"gelombang",
-        "kegiatan": r"kegiatan(?:\s+akademik)?",
-        "tanggal": r"tanggal",
-    }
-    for label, label_pattern in label_patterns.items():
-        match = re.search(
-            rf"{label_pattern}\s*:\s*(.*?)(?=,\s*(?:gelombang|kegiatan(?:\s+akademik)?|tanggal)\s*:|$)",
-            item,
-            flags=re.IGNORECASE,
-        )
-        if match:
-            fields[label] = match.group(1).strip()
-    return fields
-
-
-def _naturalize_calendar_item(item: str) -> str:
-    """Ubah satu baris kalender berlabel menjadi bullet kalimat yang natural."""
-    fields = _parse_calendar_fields(item)
-    activity = fields.get("kegiatan", "")
-    date = fields.get("tanggal", "")
-    wave = fields.get("gelombang", "")
-    if not activity or not date:
-        return item
-    if wave:
-        return f"- {activity} {wave.lower()} dilaksanakan pada {date}."
-    return f"- {activity} dilaksanakan pada {date}."
-
-
-def _naturalize_cost_item(item: str) -> str:
-    """Ubah satu baris biaya berlabel menjadi bullet kalimat yang natural."""
-    cost_match = re.search(r"Biaya\s*:\s*(.*?)(?=,\s*Keterangan\s*:|,\s*Jumlah\s*\(Rp\)\s*:|$)", item, re.IGNORECASE)
-    amount_match = re.search(r"Jumlah\s*\(Rp\)\s*:\s*([^,]+)", item, re.IGNORECASE)
-    note_match = re.search(r"Keterangan\s*:\s*(.*?)(?=,\s*Jumlah\s*\(Rp\)\s*:|$)", item, re.IGNORECASE)
-    if not cost_match or not amount_match:
-        return item
-    cost = cost_match.group(1).strip()
-    amount = amount_match.group(1).strip()
-    note = note_match.group(1).strip() if note_match else ""
-    if note:
-        return f"- {cost} berjumlah Rp{amount}, dengan keterangan: {note.rstrip('.')}."
-    return f"- {cost} berjumlah Rp{amount}."
-
-
-def _naturalize_contact_item(item: str) -> str:
-    """Ubah label kontak sederhana menjadi bullet kalimat yang natural."""
-    match = re.match(r"-\s*(Alamat|Lokasi|Website|Email|Telepon|Pusat Informasi)\s*:\s*(.+)", item, re.IGNORECASE)
-    if not match:
-        return item
-    label = match.group(1).lower()
-    value = match.group(2).strip()
-    if label in {"alamat", "lokasi"}:
-        return f"- Alamat lengkap STT Cipasung berada di {value}."
-    return f"- {match.group(1)} STT Cipasung: {value}."
-
-
-def _naturalize_answer_items(answer: str) -> str:
-    """Normalisasi bullet kalender dan biaya mentah tanpa mengubah fakta sumber."""
-    return "\n".join(
-        _naturalize_cost_item(line) if re.search(r"Jumlah\s*\(Rp\)\s*:", line, re.IGNORECASE) else (
-            _naturalize_calendar_item(_naturalize_contact_item(line)) if line.strip().startswith("-") else line
-        )
-        for line in answer.splitlines()
-    )
-
-
-def _filter_calendar_items_generically(items: list[str], question: str) -> list[str]:
-    """Pilih baris kalender berdasarkan kecocokan field, tanpa daftar event manual."""
-    parsed_items = [(item, _parse_calendar_fields(item)) for item in items]
-    if not any(fields.get("kegiatan") for _, fields in parsed_items):
-        return []
-
-    normalized_question = _normalize_calendar_question(question)
-    wave_terms = [term for term in _extract_exact_event_terms(question) if term.startswith("gelombang ")]
-    candidates = [
-        (item, fields) for item, fields in parsed_items
-        if not wave_terms or any(term in fields.get("gelombang", "").lower() for term in wave_terms)
-    ]
-    if not candidates:
-        return []
-
-    query_terms = re.findall(r"[a-z]+", normalized_question)
-    ignored_terms = {
-        "gelombang", "kapan", "jadwal", "tanggal", "kegiatan", "berapa", "pmb",
-        "yang", "untuk", "di", "ke", "dari", "apa", "saja", "dong", "ya",
-        "nol", "satu", "dua", "tiga", "empat", "lima", "enam", "tujuh",
-        "delapan", "sembilan", "sepuluh",
-    }
-    activity_terms = [term for term in query_terms if term not in ignored_terms]
-    if not activity_terms:
-        return [item for item, _fields in candidates]
-
-    query_phrase = " ".join(activity_terms)
-    scored = []
-    for item, fields in candidates:
-        activity = fields.get("kegiatan", "").lower()
-        overlap = sum(term in activity.split() for term in activity_terms)
-        score = overlap
-        if query_phrase in activity:
-            score += 100
-        if activity.startswith(query_phrase):
-            score += 50
-        scored.append((score, item))
-
-    best_score = max(score for score, _item in scored)
-    if best_score == 0:
-        return []
-    return [item for score, item in scored if score == best_score]
-
-
-def _filter_cost_items_generically(items: list[str], question: str) -> list[str]:
-    """Pilih item biaya yang paling sesuai dengan label biaya pada pertanyaan."""
-    cost_items = [item for item in items if re.search(r"Biaya\s*:", item, re.IGNORECASE)]
-    if not cost_items:
-        return []
-    normalized_question = _normalize_calendar_question(question)
-    query_terms = re.findall(r"[a-z0-9]+", normalized_question)
-    ignored_terms = {"biaya", "berapa", "nominal", "harga", "bayar", "pembayaran", "kuliah", "yang", "untuk"}
-    meaningful_terms = [term for term in query_terms if term not in ignored_terms]
-    if not meaningful_terms:
-        return cost_items
-    scored = []
-    for item in cost_items:
-        cost_match = re.search(r"Biaya\s*:\s*([^,]+)", item, re.IGNORECASE)
-        cost_label = cost_match.group(1).lower() if cost_match else ""
-        score = sum(term in cost_label.split() for term in meaningful_terms)
-        if " ".join(meaningful_terms) in cost_label:
-            score += 100
-        scored.append((score, item))
-    best_score = max(score for score, _item in scored)
-    return [item for score, item in scored if score == best_score] if best_score else cost_items
-
-
-def _filter_items_by_question_terms(items: list[str], question: str) -> list[str]:
-    """Pilih item dengan kecocokan istilah tertinggi terhadap pertanyaan."""
-    ignored_terms = {
-        "apa", "apakah", "bagaimana", "berapa", "dimana", "di", "dari", "dan",
-        "yang", "untuk", "tentang", "mengenai", "informasi", "lengkap", "resmi",
-        "kampus", "sttc", "stt", "cipasung", "tolong", "mohon", "kak", "ya",
-    }
-    terms = [term for term in re.findall(r"[a-z0-9]+", question.lower()) if term not in ignored_terms]
-    if not terms:
-        return items
-    scored = []
-    for item in items:
-        item_terms = set(re.findall(r"[a-z0-9]+", item.lower()))
-        score = sum(term in item_terms for term in terms)
-        scored.append((score, item))
-    best_score = max(score for score, _item in scored) if scored else 0
-    return [item for score, item in scored if score == best_score] if best_score else items
-
-
-def _detect_question_category(question: str) -> str:
-    """Klasifikasi topik utama pertanyaan agar routing dan filter konsisten di satu tempat."""
-    q_lower = question.lower()
-
-    if USE_CHITCHAT and is_chitchat(question):
-        return "chitchat"
-    if _is_about_institution_question(question):
-        return "institution"
-    if _is_program_profile_question(question):
-        return "program_profile"
-    if _is_program_study_question(question):
-        return "program_study"
-    if _is_beasiswa_question(question):
-        return "beasiswa"
-    if _is_ukm_question(question):
-        return "ukm"
-    if _is_procedure_question(question):
-        return "krs_procedure"
-    if any(kw in q_lower for kw in ["syarat", "persyaratan"]) and any(kw in q_lower for kw in ["perwalian", "krs"]):
-        return "requirements"
-    if _extract_exact_event_terms(question):
-        return "calendar_event"
-    if any(kw in q_lower for kw in ["biaya", "bayar", "harga", "ukt", "pembayaran", "cicil"]):
-        return "biaya"
-    if any(kw in q_lower for kw in ["jadwal", "tanggal", "kalender", "kapan", "gelombang"]):
-        return "calendar"
-    if any(kw in q_lower for kw in ["syarat", "persyaratan", "pendaftaran"]):
-        return "requirements"
-    return "general"
-
-
-def filter_items_for_question(items: list[str], question: str) -> list[str]:
-    """Batasi item sesuai event/topik yang ditanya, menggunakan aturan event yang sudah dipusatkan."""
-    q = _normalize_calendar_question(question)
-
-    if any(kw in q for kw in ["alamat", "lokasi kampus"]):
-        filtered = [item for item in items if "alamat:" in item.lower()]
-        if filtered:
-            return filtered
-
-    if _is_beasiswa_question(question):
-        filtered = [
-            item for item in items
-            if any(kw in item.lower() for kw in [
-                "beasiswa", "kip-k", "ukt 100%", "bebas/ p", "fasilitas beasiswa", "jenis beasiswa"
-            ])
-        ]
-        if filtered:
-            return filtered[:20]
-
-    if _is_ukm_question(question):
-        ukm_aliases = [
-            "proclub", "kelapa", "sanggar terasi", "kdd", "dignity", "ukm kerohanian",
-            "ukm olahraga", "rilis", "pencak silat", "unit kegiatan mahasiswa", "ukm yang saat ini ada"
-        ]
-        filtered = [
-            item for item in items
-            if any(alias in item.lower() for alias in ukm_aliases) or "ukm" in item.lower()
-        ]
-        if filtered:
-            return filtered[:20]
-
-    if _is_about_institution_question(question):
-        filtered = _filter_items_by_question_terms(items, question)
-        if filtered:
-            return filtered[:8]
-
-    if _is_program_study_question(question):
-        filtered = [item for item in items if re.search(r"\bS1\b", item, flags=re.IGNORECASE)]
-        if filtered:
-            return filtered
-
-    if _detect_question_category(question) == "requirements" and any(kw in q for kw in ["perwalian", "krs"]):
-        filtered = [
-            item for item in items
-            if not any(kw in item.lower() for kw in ["adalah proses", "adalah dokumen"])
-        ]
-        if filtered:
-            return filtered
-
-    if _detect_question_category(question) == "requirements":
-        return items
-
-    if any(kw in question.lower() for kw in ["biaya", "nominal", "harga", "bayar", "pembayaran"]):
-        cost_items = _filter_cost_items_generically(items, question)
-        if cost_items:
-            return cost_items
-
-    generic_calendar_items = _filter_calendar_items_generically(items, question)
-    if generic_calendar_items:
-        return generic_calendar_items
-
-    exact_event_terms = _extract_exact_event_terms(question)
-    if exact_event_terms:
-        wave_terms = [term for term in exact_event_terms if term.startswith("gelombang ")]
-        activity_terms = [term for term in exact_event_terms if not term.startswith("gelombang ")]
-        if wave_terms and activity_terms:
-            filtered = [
-                item for item in items
-                if any(term in item.lower() for term in wave_terms)
-                and any(term in item.lower() for term in activity_terms)
-            ]
-        else:
-            filtered = [item for item in items if any(term in item.lower() for term in exact_event_terms)]
-        if filtered and "gelombang" not in q:
-            return filtered
-
-    topic_keywords = {
-        "perwalian": ["perwalian", "perwalian online", "herregistrasi dan perwalian", "herregistrasi"],
-        "krs": ["kartu rencana studi", "krs", "pengisian krs"],
-        "herregistrasi": ["herregistrasi", "herregistrasi dan perwalian"],
-    }
-
-    for topic, keywords in topic_keywords.items():
-        if any(kw in q for kw in keywords):
-            filtered = [item for item in items if any(kw in item.lower() for kw in keywords)]
-            if filtered:
-                return filtered
-
-    generic_items = _filter_items_by_question_terms(items, question)
-    if generic_items and generic_items != items:
-        return generic_items
-
-    if "gelombang" not in q:
-        return items
-
-    q = re.sub(r"\bgelombang\s+(?:ke[- ]?)?\s*(\d|satu|dua|tiga|i|ii|iii)\b", r"gelombang \1", q, flags=re.IGNORECASE)
-
-    number_targets = []
-    if "gelombang 1" in q or "gelombang satu" in q or "gelombang i" in q:
-        number_targets += ["gelombang 1", "gelombang satu", "gelombang i"]
-    if "gelombang 2" in q or "gelombang dua" in q or "gelombang ii" in q:
-        number_targets += ["gelombang 2", "gelombang dua", "gelombang ii"]
-    if "gelombang 3" in q or "gelombang tiga" in q or "gelombang iii" in q:
-        number_targets += ["gelombang 3", "gelombang tiga", "gelombang iii"]
-
-    if not number_targets:
-        return items
-
-    filtered = []
-    for item in items:
-        lower = item.lower()
-        if any(target in lower for target in number_targets):
-            filtered.append(item)
-
-    if not filtered:
-        return items
-
-    activity_keywords = {
-        "pendaftaran": ["pendaftaran mahasiswa", "pendaftaran", "mendaftar"],
-        "seleksi": ["seleksi penerimaan", "seleksi", "tes"],
-        "pengumuman": ["pengumuman hasil seleksi", "pengumuman"],
-        "registrasi": ["registrasi administrasi", "registrasi"],
-    }
-
-    matched_activity = None
-    if "hasil seleksi" in q or "pengumuman" in q:
-        matched_activity = "pengumuman"
-    else:
-        for name, keywords in activity_keywords.items():
-            if any(kw in q for kw in keywords):
-                matched_activity = name
-                break
-
-    if matched_activity is None:
-        return filtered
-
-    activity_filtered = []
-    for item in filtered:
-        lower = item.lower()
-        is_matching_activity = any(kw in lower for kw in activity_keywords[matched_activity])
-        if matched_activity == "seleksi" and "pengumuman" in lower:
-            is_matching_activity = False
-        if is_matching_activity:
-            activity_filtered.append(item)
-
-    return activity_filtered if activity_filtered else filtered
-
-
-def _is_procedure_question(question: str) -> bool:
-    """Hanya anggap pertanyaan sebagai prosedur KRS bila ada kata kerja prosedural eksplisit."""
-    q_lower = question.lower()
-    if any(kw in q_lower for kw in ["tata cara", "cara pengisian", "langkah", "prosedur", "pengisian krs", "perwalian online"]):
-        return True
-    if "krs" in q_lower and any(kw in q_lower for kw in ["cara", "tata cara", "langkah", "prosedur", "pengisian"]):
-        return True
-    return False
-
-
-def extract_relevant_procedure_context(context: str, question: str) -> str:
-    """Ambil blok prosedur yang paling relevan untuk pertanyaan tata cara/langkah KRS."""
-    q_lower = question.lower()
-    if not _is_procedure_question(question):
-        return ""
-
-    blocks = context.split("\n\n---\n\n")
-    preferred = []
-    for block in blocks:
-        lower = block.lower()
-        if "panduan / tata cara / cara pengisian kartu rencana studi" in lower or "perwalian online" in lower:
-            preferred.append(block)
-        elif "krs" in lower and ("tata cara" in lower or "cara pengisian" in lower or "langkah" in lower or "prosedur" in lower):
-            preferred.append(block)
-
-    if preferred:
-        return preferred[0]
-    return context
-
-
-def extract_relevant_program_context(context: str, question: str) -> str:
-    """Ambil blok program studi yang paling relevan untuk pertanyaan 'tentang informatika' / 'tentang teknik industri'."""
-    q_lower = question.lower()
-    if not _is_program_profile_question(question):
-        return ""
-
-    target_terms = []
-    if "informatika" in q_lower:
-        target_terms += ["informatika", "prodi informatika"]
-    if "teknik industri" in q_lower:
-        target_terms += ["teknik industri", "prodi teknik industri"]
-    if "prodi" in q_lower and "informatika" in q_lower:
-        target_terms += ["informatika"]
-    if "prodi" in q_lower and "teknik industri" in q_lower:
-        target_terms += ["teknik industri"]
-
-    blocks = context.split("\n\n---\n\n")
-    for block in blocks:
-        lower = block.lower()
-        if any(term in lower for term in target_terms):
-            return block
-
-    return context
-
-
-def find_highlighted_lines(question: str, context: str) -> str:
-    """
-    Cari baris yang paling cocok secara HARFIAH (keyword sederhana, deterministik,
-    bukan nebak-nebak kayak LLM) dengan tipe informasi spesifik yang ditanya, lalu
-    tampilkan sebagai "petunjuk" terpisah di depan konteks. Terbukti dari testing,
-    model 3B masih suka salah ambil baris meski sudah ada instruksi eksplisit.
-    """
-    q_lower = question.lower()
-
-    keyword_groups = [
-        ("pengumuman hasil seleksi", ["pengumuman"]),
-        ("jadwal/tanggal kegiatan", ["jadwal", "tanggal", "kalender", "kapan"]),
-        ("pra ktmb", ["pra ktmb", "ktmb"]),
-        ("seleksi/tes", ["seleksi", "tes", "ujian"]),
-        ("pendaftaran PMB", ["pendaftaran", "buka", "dibuka", "penerimaan", "gelombang", "syarat", "persyaratan", "administrasi"]),
-        ("syarat pendaftaran", ["syarat", "persyaratan", "dokumen", "berkas"]),
-        ("jurusan/prodi", ["jurusan", "prodi", "program studi"]),
-        ("biaya/pembayaran", ["biaya", "pembayaran", "bayar", "ukt", "nominal"]),
-        ("tata cara/prosedur KRS", ["tata cara", "cara pengisian", "pengisian krs", "langkah", "prosedur", "perwalian online"]),
-    ]
-
-    matched_label, matched_keywords = None, None
-    for label, kws in keyword_groups:
-        if any(kw in q_lower for kw in kws):
-            matched_label, matched_keywords = label, kws
-            break
-
-    if not matched_keywords:
-        return ""
-
-    matching_lines = [
-        _format_list_item(line) for line in context.split("\n")
-        if any(kw in line.lower() for kw in matched_keywords) and _is_list_item_line(line)
-    ]
-
-    if not matching_lines:
-        return ""
-
-    daftar = "\n".join(matching_lines[:15])
-    return (
-        f"\n\n🎯 PETUNJUK FOKUS: Pertanyaan ini soal '{matched_label}'. "
-        f"Baris paling relevan dari konteks:\n{daftar}\n"
-        f"(Gunakan baris di atas sebagai acuan utama jawabanmu -- JANGAN pakai baris lain "
-        f"yang jenis informasinya beda.)"
-    )
+    return candidates[:FINAL_CONTEXT_K]
 
 
 # ============================================================
-# BAGIAN 3: PROMPT (system prompt + user message)
+# CONTEXT
 # ============================================================
 
-def build_system_prompt() -> str:
-    return """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan dan tidak berlebihan.
+def build_context(chunks: list[dict]) -> str:
+    # Jika tidak ada chunk (kosong), kembalikan string yang memberi tahu model
+    if not chunks:
+        return "TIDAK ADA DATA PANDUAN YANG DITEMUKAN."
+        
+    parts = []
+    for i, chunk in enumerate(chunks, 1):
+        source = chunk["metadata"].get("source", "dokumen")
+        parts.append(
+            f"CHUNK {i}\n"
+            f"Sumber internal: {source}\n"
+            f"Isi:\n{chunk['document'].strip()}"
+        )
 
-ATURAN WAJIB:
-1. Jawab HANYA dari konteks yang diberikan. DILARANG mengarang, menambah tanggal/info yang tidak tertulis, atau pakai pengetahuan lain. Jika info TIDAK ADA di konteks, jawab PERSIS: "Maaf kak, informasi tersebut tidak ada di panduan. Silakan hubungi bagian Tata Usaha."
-2. JANGAN campur data antar gelombang/semester atau salah sebut jenis kegiatan (Pendaftaran ≠ Seleksi ≠ Pengumuman). Ambil baris yang PERSIS sesuai.
-3. JANGAN pakai format markdown (##, **, penomoran 1/2/3). Pakai bullet "-" untuk daftar.
-4. SANGAT PENTING -- JANGAN PERNAH menyebutkan nama file dokumen (seperti "PMB.docx", dll) dan JANGAN PERNAH menampilkan tag internal seperti "[Sumber: ...]" ke jawaban.
-5. Jika konteks berupa daftar/list (syarat, biaya, jadwal, dll), tulis dalam bentuk bullet point, JANGAN diringkas jadi paragraf. TULISKAN SEMUA item yang ada di konteks dengan lengkap.
-6. JANGAN tambah penutup/saran/pengingat apapun yang tidak ada di konteks dan tidak diminta user. Jawab PERSIS yang ditanya saja.
-
-Jawab dengan jelas, ceria, tidak bertele-tele, dan tidak ambigu."""
+    return "\n\n---\n\n".join(parts)
 
 
-def build_user_message(question: str, context: str) -> str:
-    msg = f"""Konteks:
+# ============================================================
+# LLM PROMPT
+# ============================================================
+
+SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan.
+
+PENTING: Sebelum menjawab, tentukan apakah pertanyaan dari pengguna adalah pertanyaan AKADEMIK KAMPUS (PMB (Penerimaan Mahasiswa Baru), KRS, biaya, dsb) atau pertanyaan UMUM / BASA-BASI (seputar pengetahuan umum, AI, coding, sapaan, dsb).
+
+1. JIKA PERTANYAAN AKADEMIK KAMPUS:
+   - Jawab HANYA berdasarkan informasi faktual di CONTEXT.
+   - JIKA informasi yang dicari TIDAK ADA di CONTEXT, kamu WAJIB menjawab PERSIS: "Maaf kak, informasi yang kamu tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha ya!" (Jangan tambahkan informasi lain).
+   - JIKA pertanyaan tidak spesifik mengenai jadwal penerimaan mahasiswa baru (PMB), Cantumkan tanggal pendaftaran gelombang 1, 2, 3.
+   
+2. JIKA PERTANYAAN UMUM / BASA-BASI (Di luar urusan kampus):
+   - JANGAN gunakan pesan "Maaf kak..." seperti di atas.
+   - ABAIKAN CONTEXT sepenuhnya. Jawablah pertanyaan pengguna menggunakan pengetahuan umummu selayaknya AI yang pintar.
+   - Jika pengguna hanya menyapa "halo", "selamat pagi/siang/sore/malam" balas sapaannya, jika salam "assalamualaikum" balas dengan "Waalaikum salam", lalu tawarkan bantuan seputar PMB, KRS, atau biaya.
+
+ATURAN LAINNYA:
+- Jika pertanyaan tidak spesifik (seperti "saya ingin bertanya", "min mau nanya", dsb), jawablah dengan: "Boleh kak! Silakan tanyakan lebih spesifik mengenai PMB, KRS, biaya, atau jadwal ya!"
+- Jika menjawab dari context, pertahankan angka, tanggal, nama, syarat, atau biaya sesuai isi context.
+- Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
+- DILARANG menyebut nama file, metadata internal, skor similarity, routing, chunk, atau proses RAG.
+- GUNAKAN kata "kak" atau "kakak" disetiap kalimat, JANGAN GUNAKAN kata "Kamu" untuk memanggil pengguna.
+"""
+
+
+def build_user_prompt(question: str, context: str) -> str:
+    return f"""CONTEXT:
 {context}
 
-Pertanyaan:
-{question}"""
+PERTANYAAN:
+{question}
 
-    q_lower = question.lower()
-    event_label = _get_event_match_label(question)
-    event_terms = _extract_exact_event_terms(question)
-    category = _detect_question_category(question)
-
-    if category == "institution":
-        msg += "\n\nINSTRUKSI WAJIB: Ini pertanyaan tentang profil/sekilas STT Cipasung. Jawab berdasarkan konteks yang menjelaskan latar belakang, visi/misi, atau profil kampus. JANGAN bilang 'tidak ada di panduan' jika konteks yang relevan sudah ada. Tulis jawaban singkat namun jelas, bukan daftar item yang tidak relevan."
-        return msg
-
-    if category == "program_profile":
-        msg += "\n\nINSTRUKSI WAJIB: Ini pertanyaan menanyakan profil atau deskripsi program studi. Jawab berdasarkan konteks yang menjelaskan apa itu program studi, fokus pada definisi, pembelajaran, atau prospek kerja sesuai blok yang relevan. JANGAN menjawab 'tidak ada di panduan' bila blok deskripsi program sudah ada di konteks."
-        return msg
-
-    if category == "beasiswa":
-        msg += "\n\nINSTRUKSI WAJIB: Ini pertanyaan menanyakan jenis atau fasilitas beasiswa. Tampilkan daftar beasiswa yang ada, termasuk fasilitas yang didapat. JANGAN jawab dengan profil kampus atau prodi lainnya."
-        return msg
-
-    if category == "ukm":
-        msg += "\n\nINSTRUKSI WAJIB: Ini pertanyaan menanyakan UKM / Unit Kegiatan Mahasiswa. Tampilkan daftar UKM yang ada di kampus, bukan profil kampus, prodi, atau beasiswa."
-        return msg
-
-    if category == "program_study":
-        msg += "\n\nINSTRUKSI WAJIB: Ini pertanyaan menanyakan daftar program studi / jurusan yang ada. HANYA tampilkan nama program studi yang tersedia, seperti 'S1 Teknik Industri' dan 'S1 Informatika'. JANGAN tampilkan deskripsi prodi, prospek kerja, UKM, beasiswa, atau detail lain yang bukan daftar nama program studi."
-        return msg
-
-    if event_label:
-        if event_label == "gelombang":
-            target_detail = "gelombang yang dimaksud"
-        else:
-            target_detail = f"'{event_label}'"
-
-        constraint = "HANYA tampilkan item yang sesuai event ini dan JANGAN campur item kegiatan lain."
-        if event_terms:
-            constraint = f"HANYA tampilkan item yang mengandung salah satu kata kunci berikut: {', '.join(event_terms[:4])}. JANGAN campur item kegiatan lain."
-
-        msg += f"\n\nINSTRUKSI WAJIB: Pertanyaan ini spesifik untuk {target_detail}. {constraint}"
-        return msg
-
-    if any(kw in q_lower for kw in ["syarat", "persyaratan", "pendaftaran"]):
-        msg += "\n\nINSTRUKSI WAJIB: Kalau ada daftar item di konteks (bullet atau baris tabel), tampilkan SEMUA item itu sebagai bullet point terpisah. JANGAN ringkas jadi paragraf."
-    elif any(kw in q_lower for kw in ["biaya", "pembayaran", "bayar", "kuliah", "ukt"]):
-        msg += "\n\nINSTRUKSI WAJIB: Tampilkan SEMUA item biaya sebagai daftar bullet point terpisah, dengan nominal PERSIS seperti di konteks. JANGAN gabung atau ringkas."
-    elif any(kw in q_lower for kw in ["jadwal", "tanggal", "kalender", "kegiatan", "kapan", "gelombang"]):
-        msg += "\n\nINSTRUKSI WAJIB: Tampilkan SEMUA tanggal/kegiatan yang relevan sebagai daftar bullet point terpisah, jangan cuma sebut sebagian."
-    elif _is_procedure_question(question):
-        msg += "\n\nINSTRUKSI WAJIB: Ini soal tata cara/prosedur KRS. Fokus pada bagian 'Panduan / Tata Cara / Cara Pengisian Kartu Rencana Studi (KRS) / Perwalian Online' dan tampilkan langkah-langkahnya secara berurutan. JANGAN jawab syarat, jadwal, atau biaya yang bukan prosedur pengisian KRS."
-
-    return msg
+Jawab langsung pertanyaan tersebut.
+"""
 
 
 # ============================================================
-# BAGIAN 4: POST-PROCESSING (pembersihan jawaban akhir)
+# CLEANING MINIMAL
 # ============================================================
 
-def clean_markdown(text: str) -> str:
-    """
-    Jaring pengaman KODE (bukan cuma andalkan model "nurut" instruksi) buat
-    buang simbol markdown yang kadang masih kebablasan ditulis model.
-    """
-    text = text.replace("**", "*")
-    text = text.replace("## ", "").replace("### ", "").replace("# ", "")
-    text = text.replace("---\n", "").replace("\n---", "")
+def clean_output(text: str) -> str:
+    text = str(text or "").strip()
+
+    text = re.sub(
+        r"\[(?:Sumber|Konteks|Bagian|Sumber internal):[^\]]*\]\s*",
+        "",
+        text,
+        flags=re.I,
+    )
+
+    for filename in ("PMB.docx", "KRS.docx", "BIAYA.docx", "KALENDER.docx"):
+        text = text.replace(filename, "")
+
     return text.strip()
 
 
-def strip_leaked_internal_tags(text: str) -> str:
-    """
-    Jaring pengaman KODE buat kasus model kebablasan nampilin tag internal
-    ([Sumber: ...], [Bagian: ...], [Konteks: ...]) atau nama file dokumen
-    langsung ke jawaban, walau sudah dilarang di guardrail #11 & #12.
-    """
-    text = _TAG_PREFIX_RE.sub("", text)
-    # Buang juga kalau tag itu nyempil di TENGAH baris, bukan cuma di awal
-    text = re.sub(r"\[(Sumber|Bagian|Konteks):[^\]]*\]\s*", "", text)
-    # Buang penyebutan nama file dokumen kalau kebablasan disebut
-    for fname in ["PMB.docx", "KRS.docx", "BIAYA.docx", "KALENDER.docx"]:
-        text = text.replace(fname, "")
-    return text.strip()
-
-
-def generate_intro_sentence(question: str, item_count: int, topic_label: str, context: str = "") -> str:
-    """
-    Generate SATU/DUA kalimat pembuka yang natural (gaya bicara Minci) buat
-    mengantar daftar bullet point, TANPA menyebutkan isi list-nya satu per
-    satu -- isi list-nya sudah dijamin lengkap secara terpisah oleh kode.
-
-    Dipanggil HANYA saat jawaban utama gagal menghasilkan bullet point sama
-    sekali -- tidak menambah biaya/waktu di jalur normal yang sudah benar.
-    """
-    prompt = f"""Kamu adalah Minci, asisten virtual akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan.
-
-Pertanyaan user: "{question}"
-Konteks jawaban yang akan ditampilkan:
-{context}
-
-Tulis kalimat pembuka SINGKAT (1-2 kalimat, BUKAN daftar/list) untuk mengantar jawaban berupa {topic_label} yang berisi {item_count} item. Gunakan konteks dan pertanyaan agar pembuka menyebut topik yang benar. JANGAN sebutkan isi item-nya satu per satu -- daftar itemnya akan ditampilkan TERPISAH setelah kalimat pembukamu. Kalau pertanyaan user diawali sapaan, balas sapaannya dulu di kalimat pembuka ini. JANGAN sebutkan nama file dokumen apapun dan JANGAN menyebut topik lain di luar pertanyaan.
-
-PENTING: Jawab HANYA dengan kalimat pembukanya saja. JANGAN bullet point, JANGAN tanda kutip, JANGAN penjelasan lain."""
-
-    try:
-        response = ollama.chat(model=CHAT_MODEL, messages=[{"role": "user", "content": prompt}])
-        intro = response["message"]["content"].strip().strip('"')
-        intro = clean_markdown(intro)
-        intro = strip_leaked_internal_tags(intro)
-        intro = "\n".join(
-            line for line in intro.split("\n") if not line.strip().startswith("-")
-        ).strip()
-        return intro if intro else f"Berikut {topic_label}-nya, kak:"
-    except Exception as e:
-        if DEBUG:
-            print(f"[DEBUG] Gagal generate kalimat pembuka ({e}), pakai fallback template")
-        return f"Berikut {topic_label}-nya, kak:"
-
-
-def generate_focused_answer(question: str, items: list[str], topic_label: str) -> str:
-    """Generate jawaban natural dari item yang sudah dipastikan relevan."""
-    context = "\n".join(items)
-    prompt = f"""Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Jawab pertanyaan user dengan natural, singkat, ramah, dan langsung ke inti.
-
-Pertanyaan user: {question}
-Topik jawaban: {topic_label}
-Data yang boleh dipakai HANYA:
-{context}
-
-Buat jawaban 1-2 kalimat pembuka yang natural lalu tampilkan setiap data relevan dalam bullet point yang ditulis ulang secara natural, bukan menyalin format label mentah. Contoh format yang benar: '- Seleksi gelombang 1 dilaksanakan pada 12 - 13 Mei 2026.' Jangan menulis format seperti 'Gelombang: ..., Kegiatan: ..., Tanggal: ...'. Jangan mengubah nama, tanggal, angka, atau fakta dari data. Jangan menggabungkan atau menghilangkan item. Jangan menyebutkan informasi di luar data di atas. Jangan meminta user mengulang pertanyaan. Jangan menyebut nama file atau tag internal."""
-    try:
-        response = ollama.chat(model=CHAT_MODEL, messages=[{"role": "user", "content": prompt}])
-        answer = clean_markdown(response["message"]["content"])
-        answer = strip_leaked_internal_tags(answer)
-        answer = _naturalize_answer_items(answer)
-        answer_lower = answer.lower()
-        source_words = {
-            word for item in items for word in re.findall(r"[a-z0-9]+", item.lower())
-            if len(word) >= 4
-        }
-        answer_words = set(re.findall(r"[a-z0-9]+", answer_lower))
-        if any(item.lower() in answer_lower for item in items) or len(source_words & answer_words) >= 3:
-            answer_lines = [line.strip() for line in answer.splitlines() if line.strip()]
-            if answer_lines and all(line.startswith("-") for line in answer_lines):
-                intro = generate_intro_sentence(question, len(items), topic_label, context)
-                answer = intro + "\n" + answer
-            answer_bullets = [line for line in answer.splitlines() if line.strip().startswith("-")]
-            if len(answer_bullets) < len(items):
-                answer = answer.rstrip() + "\n" + "\n".join(items[len(answer_bullets):])
-            return _naturalize_answer_items(answer)
-    except Exception as e:
-        if DEBUG:
-            print(f"[DEBUG] Gagal generate jawaban fokus ({e}), pakai fallback deterministik")
-    intro = generate_intro_sentence(question, len(items), topic_label, context)
-    return intro + "\n" + _naturalize_answer_items("\n".join(items))
-
-
 # ============================================================
-# BAGIAN 5: FUNGSI UTAMA
+# API UTAMA
 # ============================================================
-
-_LIST_QUESTION_KEYWORDS = [
-    "syarat", "persyaratan", "biaya", "pembayaran", "apa saja", "apa aja",
-    "jadwal", "tanggal", "kegiatan", "kalender", "gelombang", "kapan",
-]
-
-
-def _is_list_or_detail_question(question: str, category: str) -> bool:
-    """Cek apakah pertanyaan masuk jalur list/detail yang perlu dibatasi ke konteks topik."""
-    q_lower = question.lower()
-    if any(kw in q_lower for kw in _LIST_QUESTION_KEYWORDS):
-        return True
-    if category in {"institution", "program_profile", "beasiswa", "ukm", "calendar_event", "calendar", "biaya", "requirements", "program_study", "krs_procedure"}:
-        return True
-    if any(kw in q_lower for kw in [
-        "gelombang", "jadwal", "tanggal", "kegiatan", "kalender", "biaya",
-        "syarat", "persyaratan", "tata cara", "cara", "langkah", "prosedur",
-        "pengisian", "krs", "perwalian", "ktmb", "pra ktmb", "program studi",
-        "prodi", "jurusan"
-    ]):
-        return True
-    return False
-
-
-def _detect_topic_label(question: str, category: str) -> str:
-    """Mapping label topik yang dipakai untuk kalimat pembuka fallback."""
-    q_lower = question.lower()
-
-    if category == "requirements" and any(kw in q_lower for kw in ["perwalian", "krs"]):
-        return "syarat dan ketentuan perwalian/KRS"
-    if category == "beasiswa":
-        return "jenis beasiswa"
-    if category == "ukm":
-        return "daftar UKM"
-    if "biaya" in q_lower or "bayar" in q_lower:
-        return "daftar biaya"
-    if category == "program_study":
-        return "daftar program studi"
-    if category == "institution":
-        return "profil kampus"
-    if category == "program_profile":
-        return "profil program studi"
-    if any(kw in q_lower for kw in ["jadwal", "tanggal", "kalender", "gelombang", "perwalian", "herregistrasi", "ktmb", "pra ktmb"]):
-        return "jadwal kegiatan"
-    return "daftar persyaratan"
-
 
 def ask_minci(question: str) -> str:
     """
-    Fungsi utama: retrieval + generation. Setiap pertanyaan diproses berdiri
-    sendiri (TIDAK ada riwayat/memori percakapan -- fitur ini sudah dilepas).
+    Pure RAG:
+        query -> routing -> retrieval -> gate -> context -> model
+
+    Model SELALU dipanggil untuk menghasilkan jawaban.
     """
-    question = normalize_query_text(question)
+    question = normalize_query(question)
 
-    # --- Pengecualian chit-chat dinonaktifkan sesuai kebutuhan saat ini ---
-    # Bila USE_CHITCHAT=False, semua pertanyaan (termasuk sapaan) akan masuk
-    # ke alur RAG/model; kalau retrieval kosong, model langsung dipanggil.
-    if USE_CHITCHAT and is_chitchat(question):
+    # Tetap sediakan fallback error ringan jika pertanyaan benar-benar kosong
+    if not question:
+        return "Ada yang bisa Minci bantu, kak?"
+
+    # --- Chitchat bypass: basa-basi langsung ke model TANPA RAG ---
+    if is_chitchat(question):
         if DEBUG:
-            print(f"\n💬 [DEBUG] '{question!r}' terdeteksi CHIT-CHAT -> skip RAG, langsung ke model.")
-
-        response = ollama.chat(
-            model=CHAT_MODEL,
-            messages=[
-                {"role": "system", "content": build_chitchat_system_prompt()},
-                {"role": "user", "content": question},
-            ],
-            options={"num_predict": 256},
-        )
-        answer = clean_markdown(response["message"]["content"])
-        answer = strip_leaked_internal_tags(answer)
-        return answer
-
-    context = retrieve_context(question)
-
-    if not context.strip():
-        if DEBUG:
-            print(f"\n[DEBUG] '{question!r}' tidak ada konteks relevan -> jawaban deterministik tanpa memanggil model Minci.")
-        return "Maaf kak, informasi yang Anda tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha."
-
-    category = _detect_question_category(question)
-    hint = find_highlighted_lines(question, context)
-    full_context = hint + "\n\n" + context if hint else context
-
-    if category == "general":
-        top_source = get_top_source_from_context(context)
-        context_items = extract_items_from_source(context, top_source)
-        relevant_items = filter_items_for_question(context_items, question)
-        if relevant_items:
-            return generate_focused_answer(question, relevant_items[:15], "informasi yang ditanyakan")
-        response = ollama.chat(
-            model=CHAT_MODEL,
-            messages=[
-                {"role": "system", "content": build_system_prompt()},
-                {"role": "user", "content": f"Konteks:\n{context}\n\nPertanyaan:\n{question}\n\nJawab langsung berdasarkan konteks yang relevan. Jangan meminta user mengulang pertanyaan dan jangan menyebutkan informasi yang tidak ada di konteks."},
-            ],
-            options={"num_predict": 2048},
-        )
-        answer = clean_markdown(response["message"]["content"])
-        return strip_leaked_internal_tags(_naturalize_answer_items(answer))
-
-    messages = [
-        {"role": "system", "content": build_system_prompt()},
-        {"role": "user", "content": build_user_message(question, full_context)},
-    ]
-
-    response = ollama.chat(
-        model=CHAT_MODEL,
-        messages=messages,
-        options={"num_predict": 2048},
-    )
-
-    answer = response["message"]["content"]
-    answer = clean_markdown(answer)
-    answer = strip_leaked_internal_tags(answer)
-    answer = _naturalize_answer_items(answer)
-
-    # --- Fallback deterministik: kalau model gagal bikin bullet sama sekali,
-    #     atau kalau pertanyaan spesifik seperti 'pra ktmb'/'perwalian'/'gelombang 3'
-    #     lebih cocok dijawab dari filtered context daripada output model yang campur,
-    #     kode yang susun daftar sendiri (dijamin sesuai topik) dan mengesampingkan
-    #     model output yang terlalu umum. ---
-    q_lower = question.lower()
-    if context and _is_list_or_detail_question(question, category):
-        answer_bullets = [line.strip() for line in answer.split("\n") if line.strip().startswith("-")]
-
-        top_source = get_top_source_from_context(context)
-        context_items = extract_items_from_source(context, top_source)
-        if category == "requirements" and not any(kw in q_lower for kw in ["perwalian", "krs"]):
-            requirement_blocks = [
-                block for block in context.split("\n\n---\n\n")
-                if any(marker in block.lower() for marker in ["persyaratan", "syarat dan ketentuan"])
-                and ("pendaftaran" in q_lower or "pmb" in q_lower or "administrasi" in block.lower())
-            ]
-            if requirement_blocks:
-                context_items = extract_items_from_source(requirement_blocks[0], None)
-        elif category == "requirements" and any(kw in q_lower for kw in ["perwalian", "krs"]):
-            requirement_blocks = [
-                block for block in context.split("\n\n---\n\n")
-                if "syarat dan ketentuan krs/perwalian" in block.lower()
-            ]
-            if requirement_blocks:
-                context_items = extract_items_from_source(requirement_blocks[0], None)
-        context_items = filter_items_for_question(context_items, question)
-
-        if category == "program_profile":
-            program_context = extract_relevant_program_context(context, question)
-            if program_context and program_context.strip() != context.strip():
-                intro = generate_intro_sentence(question, 1, "profil program studi")
-                answer = intro + "\n" + program_context
-                answer = clean_markdown(answer)
-                answer = strip_leaked_internal_tags(answer)
-                return answer
-
-        if len(context_items) >= 1:
-            question_is_specific_event = category == "calendar_event" or any(kw in q_lower for kw in ["gelombang", "perwalian", "herregistrasi", "ktmb", "pra ktmb", "krs", "pengisian"])
-            is_program_study_list = category == "program_study"
-            is_about_institution = category == "institution"
-            is_program_profile = category == "program_profile"
-            is_beasiswa = category == "beasiswa"
-            is_ukm = category == "ukm"
-            all_context_items = extract_items_from_source(context, top_source)
-            should_override_model = (
-                is_about_institution or is_program_study_list or is_program_profile or is_beasiswa or is_ukm or category in {"requirements", "biaya"} or
-                category == "calendar_event" or
-                (question_is_specific_event and len(context_items) < len(all_context_items)) or
-                (category == "calendar" and len(context_items) < len(all_context_items)) or
-                len(answer_bullets) == 0
+            print(f"\n[CHITCHAT] '{question}' terdeteksi basa-basi -> skip RAG")
+        try:
+            response = ollama.chat(
+                model=CHAT_MODEL,
+                messages=[
+                    {"role": "system", "content": CHITCHAT_SYSTEM_PROMPT},
+                    {"role": "user", "content": question},
+                ],
+                options={"temperature": 0.3, "num_predict": 256},
             )
+            return clean_output(response.get("message", {}).get("content", ""))
+        except Exception as exc:
+            if DEBUG: print(f"[LLM] chitchat error: {exc}")
+            return "Halo kak! Ada yang bisa Minci bantu?"
 
-            if should_override_model:
-                if _is_procedure_question(question):
-                    procedure_context = extract_relevant_procedure_context(context, question)
-                    if procedure_context and procedure_context.strip() != context.strip():
-                        intro = generate_intro_sentence(question, 1, "langkah prosedur")
-                        answer = intro + "\n" + procedure_context
-                        answer = clean_markdown(answer)
-                        answer = strip_leaked_internal_tags(answer)
-                        return answer
+    if _collection.count() == 0:
+        if DEBUG: print("[RAG] collection kosong")
+        # Biarkan model merespons dengan context kosong
 
-                topic_label = _detect_topic_label(question, category)
-                if question_is_specific_event or category in {"institution", "requirements", "biaya"}:
-                    return generate_focused_answer(question, context_items[:15], topic_label)
-                intro = generate_intro_sentence(
-                    question, len(context_items[:15]), topic_label,
-                    "\n".join(context_items[:15]),
-                )
-                answer = intro + "\n" + "\n".join(context_items[:15])
-                answer = clean_markdown(answer)
-                answer = strip_leaked_internal_tags(answer)
+    route_source, route_reason = detect_route(question)
+
+    if DEBUG:
+        print("\n" + "=" * 70)
+        print(f"[QUERY] {question}")
+        print(f"[ROUTE] {route_source or 'GLOBAL'}")
+        print(f"[WHY]   {route_reason}")
+        print("=" * 70)
+
+    try:
+        chunks = retrieve(question, route_source=route_source)
+    except Exception as exc:
+        if DEBUG: print(f"[RAG] retrieval error: {exc}")
+        chunks = []
+
+    # Blok 'if not chunks' manual dihapus, sehingga konteks kosong tetap dikirim ke model
+    context = build_context(chunks)
+
+    if DEBUG:
+        print("\n" + "=" * 70)
+        print("[CONTEXT YANG DIKIRIM KE MODEL]")
+        print("=" * 70)
+        print(context)
+        print("=" * 70)
+
+    try:
+        response = ollama.chat(
+            model=CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": build_user_prompt(question, context)},
+            ],
+            options={
+                "temperature": 0.1,
+                "num_predict": 1024,
+            },
+        )
+    except Exception as exc:
+        if DEBUG: print(f"[LLM] error: {exc}")
+        return "Maaf kak, sistem Minci sedang gangguan. Coba lagi nanti ya!"
+
+    raw_answer = response.get("message", {}).get("content", "")
+    answer = clean_output(raw_answer)
 
     return answer
 
 
+# ============================================================
+# TEST TERMINAL
+# ============================================================
+
 if __name__ == "__main__":
-    print("💬 Mode test RAG Minci (ketik 'exit' untuk keluar)\n")
+    print("\nMinci - Asisten Virtual Akademik STT Cipasung")
+    print("Ketik 'exit' untuk keluar.\n")
+
     while True:
-        q = input("Kamu: ")
-        if q.strip().lower() in ("exit", "quit"):
+        q = input("Kamu: ").strip()
+
+        if q.lower() in {"exit", "quit"}:
             break
-        jawaban = ask_minci(q)
-        print(f"\nMinci: {jawaban}\n")
+
+        answer = ask_minci(q)
+        print(f"\nKamu: {q}")
+        print(f"Minci: {answer}\n")
