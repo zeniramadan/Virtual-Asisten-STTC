@@ -2,7 +2,8 @@
 app.py
 ======
 Webhook server untuk WhatsApp Business API (Meta Cloud API).
-Menerima pesan masuk dari WhatsApp -> tanya ke Minci (RAG + model LoRA) -> balas otomatis.
+Menerima pesan masuk dari WhatsApp -> tanya ke Minci (RAG + model chat via Ollama,
+lihat CHAT_MODEL di query.py) -> balas otomatis.
 
 Jalankan:
     uvicorn app:app --host 0.0.0.0 --port 8000
@@ -39,6 +40,13 @@ WA_API_VERSION = os.getenv("WA_API_VERSION", "v20.0")
 # ====================================
 
 WA_SEND_URL = f"https://graph.facebook.com/{WA_API_VERSION}/{WA_PHONE_NUMBER_ID}/messages"
+
+# query.py yang baru SELALU memanggil LLM untuk setiap pesan (tidak ada lagi
+# jalur fallback cepat tanpa model) -- artinya proses di background sekarang
+# konsisten lambat (~10-20 detik). Timeout ini adalah pengaman AGAR koneksi ke
+# WhatsApp API tidak menahan thread background selamanya kalau Meta lagi lemot,
+# bukan timeout untuk proses RAG-nya sendiri.
+WA_SEND_TIMEOUT_SECONDS = 30
 
 # ============================================================
 # DEDUPLIKASI PESAN: cegah jawaban dobel kalau Meta retry webhook
@@ -154,10 +162,23 @@ def process_and_reply(from_number: str, user_text: str):
         send_whatsapp_message(to=from_number, text=reply_text)
     except Exception as e:
         logger.error(f"Gagal memproses/membalas pesan dari {from_number}: {e}")
-        send_whatsapp_message(
-            to=from_number,
-            text="Waduh, ada gangguan teknis nih kak 🙏 Coba tanya lagi sebentar ya.",
-        )
+        # Percobaan kedua ini (kirim pesan error ke user) juga bisa gagal --
+        # mis. kalau penyebab error di atas justru koneksi ke WhatsApp API
+        # (timeout/down), maka percobaan kirim pesan error ini kemungkinan
+        # besar akan gagal juga dengan sebab yang sama. Dibungkus try/except
+        # terpisah supaya kegagalan ini TERCATAT DI LOG, bukan cuma diam --
+        # tanpa ini, exception di sini akan jadi unhandled exception di dalam
+        # background thread dan user tidak dapat balasan apapun tanpa jejak log.
+        try:
+            send_whatsapp_message(
+                to=from_number,
+                text="Waduh, ada gangguan teknis nih kak 🙏 Coba tanya lagi sebentar ya.",
+            )
+        except Exception as notify_error:
+            logger.error(
+                f"Gagal juga mengirim pesan error ke {from_number} "
+                f"(kemungkinan WhatsApp API/koneksi bermasalah): {notify_error}"
+            )
 
 
 def send_whatsapp_message(to: str, text: str):
@@ -173,7 +194,7 @@ def send_whatsapp_message(to: str, text: str):
         "text": {"body": text},
     }
 
-    resp = requests.post(WA_SEND_URL, headers=headers, json=payload)
+    resp = requests.post(WA_SEND_URL, headers=headers, json=payload, timeout=WA_SEND_TIMEOUT_SECONDS)
 
     if resp.status_code != 200:
         logger.error(f"Gagal kirim pesan WA: {resp.status_code} - {resp.text}")
