@@ -7,6 +7,7 @@ Pure RAG query.py untuk Minci.
 """
 
 from __future__ import annotations
+import json
 import os
 import re
 from collections import Counter
@@ -63,10 +64,26 @@ _NUMBER_WORDS = {
     "sembilan": "9", "sepuluh": "10",
 }
 
+_ABBREVIATION_ALIASES = (
+    (r"\bp\s*\.?\s*m\s*\.?\s*b\s*\.?\b", "PMB penerimaan mahasiswa baru"),
+    (r"\bk\s*\.?\s*r\s*\.?\s\s*\.?\b", "KRS kartu rencana studi"),
+    (r"\bp\s*\.?\s*r\s*\.?\s*o\s*\.?\s*d\s*\.?\s*i\s*\.?\b", "PRODI program studi"),
+    (r"\bu\s*\.??\s*k\s*\.??\s*m\s*\.??\b", "UKM unit kegiatan mahasiswa"),
+    (r"\bk\s*\.??\s*p\s*\.??\s*r\s*\.??\s*s\s*\.??\b", "KPRS kartu perubahan rencana studi"),
+)
+
+
+def normalize_abbreviations(text: str) -> str:
+    for pattern, replacement in _ABBREVIATION_ALIASES:
+        text = re.sub(pattern, replacement, text, flags=re.I)
+    return text
+
 
 def normalize_query(question: str) -> str:
     q = str(question or "").strip()
     q = re.sub(r"\s+", " ", q)
+    q = normalize_abbreviations(q)
+    q = re.sub(r"\s+", " ", q).strip()
 
     q = re.sub(r"\bgelombang\s+i\b", "gelombang 1", q, flags=re.I)
     q = re.sub(r"\bgelombang\s+ii\b", "gelombang 2", q, flags=re.I)
@@ -84,6 +101,62 @@ def normalize_query(question: str) -> str:
 
 
 # ============================================================
+# CHITCHAT DETECTION (basa-basi → skip RAG)
+# ============================================================
+
+CHITCHAT_PATH = os.path.join(BASE_DIR, "..", "dataset", "chitchat.json")
+
+
+def _load_chitchat_phrases() -> list[str]:
+    """Baca semua frasa chit-chat dari chitchat.json jadi satu list flat."""
+    try:
+        with open(CHITCHAT_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+    phrases = []
+    for _kategori, daftar in data.items():
+        phrases.extend(daftar)
+    phrases.sort(key=len, reverse=True)
+    return phrases
+
+
+_CHITCHAT_PHRASES = _load_chitchat_phrases()
+
+if DEBUG:
+    print(f"[CHITCHAT] {len(_CHITCHAT_PHRASES)} frasa dimuat")
+
+
+def is_chitchat(question: str) -> bool:
+    """True kalau pertanyaan cuma basa-basi tanpa substansi akademik."""
+    if not _CHITCHAT_PHRASES:
+        return False
+    q = question.lower().strip()
+    q = re.sub(r"\s+", " ", q)
+    q = re.sub(r"[!?.,]+$", "", q)
+    for phrase in _CHITCHAT_PHRASES:
+        if q == phrase:
+            return True
+        if q.startswith(phrase + " ") or q.startswith(phrase + ","):
+            remainder = q[len(phrase):].strip(" ,.-")
+            if len(remainder.split()) <= 3:
+                return True
+    return False
+
+
+CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan.
+
+Ini pesan basa-basi (sapaan/ucapan terima kasih/obrolan ringan), BUKAN pertanyaan akademik.
+Balas SINGKAT (1-2 kalimat) dan natural sesuai basa-basinya.
+- Jika sapaan ("halo", "selamat pagi"), balas sapaannya lalu tawarkan bantuan seputar PMB, KRS, atau biaya.
+- Jika salam ("assalamualaikum"), balas "Waalaikumsalam kak!" lalu tawarkan bantuan.
+- Jika ucapan terima kasih ("makasih"), balas "Sama-sama kak!" atau sejenisnya.
+- Jika pertanyaan tidak spesifik ("mau nanya", "ingin bertanya"), jawab "Boleh kak! Silakan tanyakan lebih spesifik mengenai PMB, KRS, biaya, atau jadwal ya!"
+- Gunakan kata "kak" atau "kakak", JANGAN gunakan kata "Kamu" untuk memanggil pengguna.
+JANGAN mengarang info akademik apapun di sini."""
+
+
+# ============================================================
 # ROUTING
 # ============================================================
 
@@ -94,19 +167,19 @@ ROUTES = [
         "biaya pendaftaran", "biaya registrasi",
     ]),
     ("KALENDER.docx", [
-        "jadwal", "tanggal", "kalender", "kapan", "gelombang",
+        "jadwal", "tanggal", "tanggal pmb", "tanggal penerimaan", "kalender", "kapan", "gelombang",
         "pra ktmb", "ktmb", "hasil seleksi", "pengumuman", "seleksi",
         "perwalian", "herregistrasi", "kprs", "cuti kuliah", "uts", "uas",
     ]),
     ("KRS.docx", [
-        "krs", "kartu rencana studi", "pengisian krs", "isi krs",
-        "mengisi krs", "cara krs", "tata cara krs", "prosedur krs",
-        "perwalian online", "rencana studi", "mata kuliah",
+        "krs", "kartu rencana studi", "pengisian krs", "isi krs", "syarat krs",
+        "mengisi krs", "cara krs", "tata cara krs", "prosedur krs", "syarat perwalian",
+        "perwalian online", "rencana studi", "mata kuliah", "perwalian",
     ]),
     ("PMB.docx", [
         "pmb", "penerimaan mahasiswa baru", "mahasiswa baru",
         "calon mahasiswa", "pendaftaran", "mendaftar", "daftar kuliah",
-        "syarat masuk", "persyaratan masuk", "jalur masuk",
+        "syarat masuk", "syarat pendaftaran", "persyaratan masuk", "jalur masuk",
         "program studi", "prodi", "jurusan", "beasiswa", "ukm",
         "unit kegiatan mahasiswa", "profil kampus", "tentang kampus",
         "tentang stt cipasung",
@@ -121,7 +194,22 @@ def _route_text(text: str) -> str:
 
 
 def detect_route(question: str) -> tuple[str | None, str]:
-    q = _route_text(question)
+    q = _route_text(normalize_query(question))
+
+    words = set(q.split())
+    requirement_words = {"syarat", "persyaratan", "dokumen", "berkas"}
+    krs_words = {"krs", "perwalian"}
+    registration_words = {
+        "pendaftaran", "mendaftar", "daftar", "pmb", "masuk",
+        "calon", "mahasiswa",
+    }
+
+    if words & requirement_words and words & krs_words:
+        return "KRS.docx", "prioritas syarat KRS/perwalian"
+
+    if words & requirement_words and words & registration_words:
+        return "PMB.docx", "prioritas syarat pendaftaran PMB"
+
     scores = Counter()
     matches = {}
 
@@ -146,8 +234,6 @@ def detect_route(question: str) -> tuple[str | None, str]:
 
     if best_score >= second_score + 2:
         return best_source, f"keyword={matches[best_source]}"
-
-    words = set(q.split())
 
     if words & {"biaya", "bayar", "nominal", "ukt", "harga"}:
         return "BIAYA.docx", "prioritas biaya/pembayaran"
@@ -174,11 +260,12 @@ _STOPWORDS = {
     "kapan", "dimana", "mana", "saja", "aja", "dong", "deh", "sih",
     "ya", "nih", "kak", "min", "minci", "tolong", "mohon", "bisa",
     "gak", "nggak", "enggak", "tidak", "tau", "tahu", "stt",
-    "cipasung", "kampus", "informasi",
+    "cipasung", "kampus", "informasi", "nya",
 }
 
 
 def meaningful_tokens(text: str) -> set[str]:
+    text = normalize_abbreviations(text)
     return {
         x for x in re.findall(r"[a-z0-9]+", text.lower())
         if len(x) >= 3 and x not in _STOPWORDS
@@ -270,24 +357,26 @@ def build_context(chunks: list[dict]) -> str:
 # LLM PROMPT
 # ============================================================
 
-SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung, yang membahas tentang PMB, KRS, dan biaya.
+SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan.
 
-Jawab pertanyaan pengguna HANYA menggunakan informasi faktual yang ada di CONTEXT.
+PENTING: Sebelum menjawab, tentukan apakah pertanyaan dari pengguna adalah pertanyaan AKADEMIK KAMPUS (PMB (Penerimaan Mahasiswa Baru), KRS, biaya, dsb) atau pertanyaan UMUM / BASA-BASI (seputar pengetahuan umum, AI, coding, sapaan, dsb).
 
-ATURAN WAJIB FALLBACK:
-- Jika CONTEXT berisi "TIDAK ADA DATA PANDUAN YANG DITEMUKAN" atau informasi yang ditanyakan sama sekali TIDAK ADA di CONTEXT, kamu WAJIB menjawab PERSIS dengan kalimat ini:
-  "Maaf kak, informasi yang kamu tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha ya!"
-  (Jangan menambahkan penjelasan atau kalimat lain).
-  PENGECUALIAN: Jika pertanyaan pengguna HANYA berisi sapaan/salam seperti "halo, selamat pagi/siang/sore/mala, assalamualaikum" atau basa-basi pendek, ABAIKAN aturan fallback ini dan gunakan aturan sapaan di bawah.
+1. JIKA PERTANYAAN AKADEMIK KAMPUS:
+   - Jawab HANYA berdasarkan informasi faktual di CONTEXT.
+   - JIKA informasi yang dicari TIDAK ADA di CONTEXT, kamu WAJIB menjawab PERSIS: "Maaf kak, informasi yang kamu tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha ya!" (Jangan tambahkan informasi lain).
+   - JIKA pertanyaan tidak spesifik mengenai jadwal penerimaan mahasiswa baru (PMB), Cantumkan tanggal pendaftaran gelombang 1, 2, 3.
+   
+2. JIKA PERTANYAAN UMUM / BASA-BASI (Di luar urusan kampus):
+   - JANGAN gunakan pesan "Maaf kak..." seperti di atas.
+   - ABAIKAN CONTEXT sepenuhnya. Jawablah pertanyaan pengguna menggunakan pengetahuan umummu selayaknya AI yang pintar.
+   - Jika pengguna hanya menyapa "halo", "selamat pagi/siang/sore/malam" balas sapaannya, jika salam "assalamualaikum" balas dengan "Waalaikum salam", lalu tawarkan bantuan seputar PMB, KRS, atau biaya.
 
 ATURAN LAINNYA:
-- Jangan menggunakan pengetahuan dari luar CONTEXT, Jangan menebak, Jangan mengarang informasi.
-- Jika context memiliki angka, tanggal, nama, syarat, biaya, atau aturan, pertahankan sesuai isi context.
-- Jika context berupa daftar, tampilkan informasi relevan dengan jelas menggunakan bullet "-".
-- Jangan menyebut nama file, metadata internal, skor similarity, routing, chunk, atau proses RAG.
-- Jawab langsung dan natural dalam Bahasa Indonesia dengan gaya Gen-Z (ramah, sopan, gunakan kata "kak").
-- Jika pengguna memberi sapaan "halo, selamat pagi/siang/sore/malam" jawab dengan "Halo kak!", jika salam "Assalamualaikum" jawab dengan "Waalaikumsalam kak!".
-- Jika pertanyaan tidak spesifik (misal pola kalimat "ingin tanya"), jawab "Kakak bisa tanyakan lebih spesifik mengenai PMB, KRS, atau biaya ya!".
+- Jika pertanyaan tidak spesifik (seperti "saya ingin bertanya", "min mau nanya", dsb), jawablah dengan: "Boleh kak! Silakan tanyakan lebih spesifik mengenai PMB, KRS, biaya, atau jadwal ya!"
+- Jika menjawab dari context, pertahankan angka, tanggal, nama, syarat, atau biaya sesuai isi context.
+- Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
+- DILARANG menyebut nama file, metadata internal, skor similarity, routing, chunk, atau proses RAG.
+- Gunakan kata "kak" atau "kakak", JANGAN gunakan kata "Kamu" untuk memanggil pengguna.
 """
 
 
@@ -338,6 +427,24 @@ def ask_minci(question: str) -> str:
     # Tetap sediakan fallback error ringan jika pertanyaan benar-benar kosong
     if not question:
         return "Ada yang bisa Minci bantu, kak?"
+
+    # --- Chitchat bypass: basa-basi langsung ke model TANPA RAG ---
+    if is_chitchat(question):
+        if DEBUG:
+            print(f"\n[CHITCHAT] '{question}' terdeteksi basa-basi -> skip RAG")
+        try:
+            response = ollama.chat(
+                model=CHAT_MODEL,
+                messages=[
+                    {"role": "system", "content": CHITCHAT_SYSTEM_PROMPT},
+                    {"role": "user", "content": question},
+                ],
+                options={"temperature": 0.3, "num_predict": 256},
+            )
+            return clean_output(response.get("message", {}).get("content", ""))
+        except Exception as exc:
+            if DEBUG: print(f"[LLM] chitchat error: {exc}")
+            return "Halo kak! Ada yang bisa Minci bantu?"
 
     if _collection.count() == 0:
         if DEBUG: print("[RAG] collection kosong")
