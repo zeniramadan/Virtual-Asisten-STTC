@@ -210,6 +210,19 @@ def detect_route(question: str) -> tuple[str | None, str]:
     if words & requirement_words and words & registration_words:
         return "PMB.docx", "prioritas syarat pendaftaran PMB"
 
+    # PRIORITAS KATA TANYA WAKTU: "kapan"/"tanggal"/"jadwal" HARUS menang
+    # duluan, sebelum scoring keyword biasa. Kenapa ini perlu: normalize_abbreviations()
+    # mengubah "pmb" jadi "PMB penerimaan mahasiswa baru" -- akibatnya frasa panjang
+    # ini ikut disisipkan ke teks query dan mendominasi skor Counter di bawah
+    # (bobotnya = jumlah kata di frasa, jadi "penerimaan mahasiswa baru" dapat
+    # bobot 3, sementara "kapan" cuma bobot 1). Tanpa aturan ini, pertanyaan
+    # "kapan pmb dibuka" selalu di-route paksa ke PMB.docx dan KALENDER.docx
+    # (tempat tanggal/jadwal sebenarnya disimpan) tidak pernah ikut dicari sama
+    # sekali karena routing pakai hard where-filter.
+    time_words = {"kapan", "tanggal", "jadwal"}
+    if words & time_words:
+        return "KALENDER.docx", "prioritas kata tanya waktu (kapan/tanggal/jadwal)"
+
     scores = Counter()
     matches = {}
 
@@ -376,7 +389,7 @@ ATURAN LAINNYA:
 - Jika menjawab dari context, pertahankan angka, tanggal, nama, syarat, atau biaya sesuai isi context.
 - Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
 - DILARANG menyebut nama file, metadata internal, skor similarity, routing, chunk, atau proses RAG.
-- Gunakan kata "kak" atau "kakak", JANGAN gunakan kata "Kamu" untuk memanggil pengguna.
+- GUNAKAN kata "kak" atau "kakak" disetiap kalimat, JANGAN GUNAKAN kata "Kamu" untuk memanggil pengguna.
 """
 
 
@@ -502,7 +515,7 @@ def ask_minci(question: str) -> str:
 # ============================================================
 
 if __name__ == "__main__":
-    print("Minci - Pure RAG Test")
+    print("\nMinci - Asisten Virtual Akademik STT Cipasung")
     print("Ketik 'exit' untuk keluar.\n")
 
     while True:
