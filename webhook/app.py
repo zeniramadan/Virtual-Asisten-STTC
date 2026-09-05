@@ -111,7 +111,6 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
     webhook "gagal" dan melakukan retry, yang tadinya menyebabkan jawaban dobel.
     """
     body = await request.json()
-    logger.info(f"Payload masuk: {body}")
 
     try:
         entry = body["entry"][0]
@@ -159,7 +158,7 @@ def process_and_reply(from_number: str, user_text: str):
     """
     try:
         reply_text = ask_minci(user_text)
-        send_whatsapp_message(to=from_number, text=reply_text)
+        send_whatsapp_message(to=from_number, text=reply_text, user_text=user_text)
     except Exception as e:
         logger.error(f"Gagal memproses/membalas pesan dari {from_number}: {e}")
         # Percobaan kedua ini (kirim pesan error ke user) juga bisa gagal --
@@ -181,7 +180,7 @@ def process_and_reply(from_number: str, user_text: str):
             )
 
 
-def send_whatsapp_message(to: str, text: str):
+def send_whatsapp_message(to: str, text: str, user_text: str = ""):
     """Kirim balasan teks ke user via WhatsApp Cloud API."""
     headers = {
         "Authorization": f"Bearer {WA_ACCESS_TOKEN}",
@@ -200,6 +199,9 @@ def send_whatsapp_message(to: str, text: str):
         logger.error(f"Gagal kirim pesan WA: {resp.status_code} - {resp.text}")
     else:
         logger.info(f"Balasan terkirim ke {to}")
+        if user_text:
+            logger.info(f"Pesan: {user_text}")
+        logger.info(f"Jawaban: {text}")
 
 
 @app.get("/")

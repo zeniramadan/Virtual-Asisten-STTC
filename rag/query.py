@@ -65,10 +65,10 @@ _NUMBER_WORDS = {
 }
 
 _ABBREVIATION_ALIASES = (
-    (r"\bp\s*\.?\s*m\s*\.?\s*b\s*\.?\b", "PMB penerimaan mahasiswa baru"),
-    (r"\bk\s*\.?\s*r\s*\.?\s\s*\.?\b", "KRS kartu rencana studi"),
-    (r"\bp\s*\.?\s*r\s*\.?\s*o\s*\.?\s*d\s*\.?\s*i\s*\.?\b", "PRODI program studi"),
-    (r"\bu\s*\.??\s*k\s*\.??\s*m\s*\.??\b", "UKM unit kegiatan mahasiswa"),
+    (r"\bp\s*\.?\s*m\s*\.?\s*b\s*\.?\b", "PMB penerimaan mahasiswa baru\n"),
+    (r"\bk\s*\.?\s*r\s*\.?\s\s*\.?\b", "KRS kartu rencana studi\n"),
+    (r"\bp\s*\.?\s*r\s*\.?\s*o\s*\.?\s*d\s*\.?\s*i\s*\.?\b", "PRODI program studi\n"),
+    (r"\bu\s*\.??\s*k\s*\.??\s*m\s*\.??\b", "UKM unit kegiatan mahasiswa\n"),
     (r"\bk\s*\.??\s*p\s*\.??\s*r\s*\.??\s*s\s*\.??\b", "KPRS kartu perubahan rencana studi"),
 )
 
@@ -144,17 +144,23 @@ def is_chitchat(question: str) -> bool:
     return False
 
 
-CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan.
+CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
 
-Ini pesan basa-basi (sapaan/ucapan terima kasih/obrolan ringan), BUKAN pertanyaan akademik.
-Balas SINGKAT (1-2 kalimat) dan natural sesuai basa-basinya.
-- Jika sapaan ("halo", "selamat pagi"), balas sapaannya lalu tawarkan bantuan seputar PMB, KRS, atau biaya.
-- Jika salam ("assalamualaikum"), balas "Waalaikumsalam kak!" lalu tawarkan bantuan.
-- Jika ucapan terima kasih ("makasih"), balas "Sama-sama kak!" atau sejenisnya.
-- Jika pertanyaan tidak spesifik ("mau nanya", "ingin bertanya"), jawab "Boleh kak! Silakan tanyakan lebih spesifik mengenai PMB, KRS, biaya, atau jadwal ya!"
-- Gunakan kata "kak" atau "kakak", JANGAN GUNAKAN kata "Kamu".
-JANGAN mengarang info akademik apapun di sini."""
+TUGAS UTAMA:
+Jawab sapaan, salam, ucapan terima kasih, atau obrolan ringan (chitchat) dari pengguna dengan SINGKAT (maksimal 2 kalimat) dan super natural!
 
+ATURAN BALASAN SESUAI KONTEKS:
+1. Jika pengguna MENYAPA (halo, hai, pagi, siang, sore, malam), balas sapaannya dengan ceria, lalu tawarkan bantuan seputar PMB, KRS, atau biaya.
+2. Jika pengguna MENGUCAP SALAM (assalamualaikum), wajib balas "Waalaikumsalam kak!" lalu tawarkan bantuan.
+3. Jika pengguna berterima kasih (makasih, thank you), balas dengan "Sama-sama kak! Senang bisa bantu."
+4. Jika pengguna BERTANYA HAL LAIN (seperti "lagi apa?", "kamu siapa?", "mau nanya"), jawab sesuai pertanyaan ringan mereka dengan gaya santai Gen-Z, lalu arahkan kembali agar mereka bertanya tentang PMB, KRS, atau biaya.
+
+KATA KUNCI LARANGAN KERAS:
+- HARUS menggunakan kata "kak" atau "kakak" di setiap kalimat!
+- DILARANG KERAS menggunakan kata "Kamu" atau "Anda" saat menyapa pengguna!
+- JANGAN PERNAH memberikan jawaban template "Sama-sama" jika pengguna tidak sedang berterima kasih!
+- JANGAN mengarang atau memberikan informasi akademik palsu di sini!
+"""
 
 # ============================================================
 # ROUTING
@@ -406,31 +412,29 @@ def build_context(chunks: list[dict]) -> str:
 # LLM PROMPT
 # ============================================================
 
-SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan.
+SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
 
-PENTING: Sebelum menjawab, tentukan apakah pertanyaan dari pengguna adalah pertanyaan AKADEMIK KAMPUS (PMB (Penerimaan Mahasiswa Baru), KRS, biaya, dsb) atau pertanyaan UMUM / BASA-BASI (seputar pengetahuan umum, AI, coding, sapaan, dsb).
+PENTING: Cek isi teks CONTEXT terlebih dahulu sebelum melihat PERTANYAAN!
 
-1. JIKA PERTANYAAN AKADEMIK KAMPUS:
-   - Jawab HANYA berdasarkan informasi faktual di CONTEXT.
-     - Jika pertanyaan meminta "syarat" atau "persyaratan", jawab hanya daftar syarat/dokumen/ketentuannya. Jangan menjelaskan tata cara atau langkah pengisian kecuali kakak memang menanyakannya.
-     - Jika pertanyaan meminta "cara", "tata cara", atau "prosedur", jawab hanya langkah-langkahnya dan jangan menggantinya dengan daftar persyaratan.
-   - JIKA informasi yang dicari TIDAK ADA di CONTEXT, kamu WAJIB menjawab PERSIS: "Maaf kak, informasi yang kamu tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha ya!" (Jangan tambahkan informasi lain).
-   - JIKA pertanyaan tidak spesifik mengenai jadwal penerimaan mahasiswa baru (PMB), Cantumkan tanggal pendaftaran gelombang 1, 2, 3.
-   
-2. JIKA PERTANYAAN UMUM / BASA-BASI (Di luar urusan kampus):
-   - JANGAN gunakan pesan "Maaf kak..." seperti di atas.
-   - ABAIKAN CONTEXT sepenuhnya. Jawablah pertanyaan pengguna menggunakan pengetahuan umummu selayaknya AI yang pintar.
-   - Jika pengguna hanya menyapa "halo", "selamat pagi/siang/sore/malam" balas sapaannya, jika salam "assalamualaikum" balas dengan "Waalaikum salam", lalu tawarkan bantuan seputar PMB, KRS, atau biaya.
-   - Jika pengguna tidak menyapa atau mengucap salam, kamu JANGAN memberikan sapaan atau salam.
+KONDISI 1 - JIKA CONTEXT BERISI TULISAN "TIDAK ADA DATA PANDUAN YANG DITEMUKAN.":
+- Kamu WAJIB dan HANYA BOLEH menjawab dengan kalimat persis seperti ini: "Maaf kak, informasi yang kamu tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha ya!"
+- DILARANG KERAS mengarang, menebak, atau menggunakan pengetahuan umummu untuk menjawab pertanyaan akademik seputar kampus jika context kosong!
 
-ATURAN LAINNYA:
-- Jika pertanyaan tidak spesifik (seperti "saya ingin bertanya", "min mau nanya", dsb), jawablah dengan: "Boleh kak! Silakan tanyakan lebih spesifik mengenai PMB, KRS, biaya, atau jadwal ya!"
-- Jika menjawab dari context, pertahankan angka, tanggal, nama, syarat, atau biaya sesuai isi context.
+KONDISI 2 - JIKA CONTEXT BERISI DATA PANDUAN AKTIF:
+- Jawab pertanyaan pengguna HANYA berdasarkan informasi faktual yang tertulis di dalam CONTEXT tersebut.
+- Jika pertanyaan meminta "syarat", berikan DAFTAR SYARAT saja dari context. Jangan jelaskan tata cara.
+- Jika pertanyaan meminta "cara", berikan LANGKAH-LANGKAH saja dari context. Jangan berikan daftar syarat.
+- JIKA pertanyaan meminta "syarat" atau "persyaratan", kamu WAJIB DAN HARUS MENULISKAN SEMUA DAFTAR SYARAT YANG ADA DI CONTEXT SECARA LENGKAP! 
+- Jika pertanyaan tidak spesifik mengenai jadwal PMB, cantumkan tanggal pendaftaran gelombang 1, 2, dan 3 yang tertera di context.
+
+KONDISI 3 - JIKA PERTANYAAN ADALAH PERTANYAAN UMUM DI LUAR URUSAN KAMPUS (Contoh: matematika, sejarah, coding, AI):
+- ABAIKAN CONTEXT dan jawablah dengan pengetahuan umummu secara cerdas dan santai.
+
+ATURAN WAJIB UNTUK SEMUA JAWABAN:
+- HARUS menggunakan kata "kak" atau "kakak" di SETIAP kalimat! DILARANG menggunakan kata "Kamu".
 - Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
-- DILARANG menyebut nama file, metadata internal, skor similarity, routing, chunk, atau proses RAG.
-- HARUS MENGGUNAKAN kata "kak" atau "kakak" disetiap kalimat.
+- JANGAN PERNAH menyebutkan kata teknis seperti "context", "metadata", "chunk", atau "RAG".
 """
-
 
 def build_user_prompt(question: str, context: str) -> str:
     return f"""CONTEXT:
@@ -459,9 +463,13 @@ def clean_output(text: str) -> str:
 
     for filename in ("PMB.docx", "KRS.docx", "BIAYA.docx", "KALENDER.docx"):
         text = text.replace(filename, "")
-
+        
+    # 3. Ubah semua bullet poin fisik (• atau *) menjadi "-" tanpa merusak teks
+    text = text.replace("•", "-")
+    text = text.replace("▪", "-")
+    text = text.replace("⁃", "-")
+    
     return text.strip()
-
 
 # ============================================================
 # API UTAMA
@@ -480,7 +488,7 @@ def ask_minci(question: str) -> str:
     if not question:
         return "Ada yang bisa Minci bantu, kak?"
 
-    # --- Chitchat bypass: basa-basi langsung ke model TANPA RAG ---
+       # --- Chitchat bypass: basa-basi langsung ke model TANPA RAG ---
     if is_chitchat(question):
         if DEBUG:
             print(f"\n[CHITCHAT] '{question}' terdeteksi basa-basi -> skip RAG")
@@ -491,12 +499,17 @@ def ask_minci(question: str) -> str:
                     {"role": "system", "content": CHITCHAT_SYSTEM_PROMPT},
                     {"role": "user", "content": question},
                 ],
-                options={"temperature": 0.3, "num_predict": 256},
+                options={
+                    "temperature": 0.4,     # Naik sedikit ke 0.4 agar gaya Gen-Z nya lebih natural & tidak kaku
+                    "top_p": 0.9,           # Membatasi pilihan kata agar tetap masuk akal
+                    "num_predict": 100,     # Batasan respons chitchat pendek (maksimal ~100 token)
+                },
             )
             return clean_output(response.get("message", {}).get("content", ""))
         except Exception as exc:
             if DEBUG: print(f"[LLM] chitchat error: {exc}")
             return "Halo kak! Ada yang bisa Minci bantu?"
+
 
     if _collection.count() == 0:
         if DEBUG: print("[RAG] collection kosong")
@@ -527,21 +540,31 @@ def ask_minci(question: str) -> str:
         print(context)
         print("=" * 70)
 
-    try:
-        response = ollama.chat(
-            model=CHAT_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_prompt(question, context)},
-            ],
-            options={
-                "temperature": 0.1,
-                "num_predict": 1024,
-            },
-        )
-    except Exception as exc:
-        if DEBUG: print(f"[LLM] error: {exc}")
-        return "Maaf kak, sistem Minci sedang gangguan. Coba lagi nanti ya!"
+        try:
+            # PENTING: Gunakan format ini agar Ollama menyuntikkan template chat Llama 3.2 secara benar
+            response = ollama.chat(
+                model=CHAT_MODEL,
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": SYSTEM_PROMPT
+                    },
+                    {
+                        "role": "user", 
+                        "content": build_user_prompt(question, context)
+                    },
+                ],
+                options={
+                    "temperature": 0.1,    # Sudah benar (rendah agar konsisten)
+                    "num_predict": 1024,
+                    # Tambahkan parameter di bawah ini jika model masih suka tidak patuh:
+                    # "top_p": 0.9,
+                },
+            )
+        except Exception as exc:
+            if DEBUG: print(f"[LLM] error: {exc}")
+            return "Maaf kak, sistem Minci sedang gangguan. Coba lagi nanti ya!"
+
 
     raw_answer = response.get("message", {}).get("content", "")
     answer = clean_output(raw_answer)
