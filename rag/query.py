@@ -276,6 +276,13 @@ _STOPWORDS = {
     "cipasung", "kampus", "informasi", "nya",
 }
 
+_REQUIREMENT_TERMS = {
+    "syarat", "persyaratan", "dokumen", "berkas", "ketentuan",
+}
+_PROCEDURE_TERMS = {
+    "cara", "tata cara", "langkah", "prosedur", "mengisi", "pengisian",
+}
+
 
 def meaningful_tokens(text: str) -> set[str]:
     text = normalize_abbreviations(text)
@@ -287,6 +294,33 @@ def meaningful_tokens(text: str) -> set[str]:
 
 def lexical_overlap(question: str, document: str) -> int:
     return len(meaningful_tokens(question) & meaningful_tokens(document))
+
+
+def intent_match(question: str, document: str) -> int:
+    """Prioritaskan section dokumen yang sesuai dengan intent pertanyaan."""
+    question_text = _route_text(normalize_query(question))
+    document_text = _route_text(document)
+
+    requirement_query = bool(
+        meaningful_tokens(question_text) & _REQUIREMENT_TERMS
+    )
+    procedure_query = bool(
+        meaningful_tokens(question_text)
+        & {"cara", "langkah", "prosedur", "mengisi", "pengisian"}
+    )
+
+    score = 0
+    if requirement_query and any(
+        re.search(rf"(?<!\w){re.escape(term)}(?!\w)", document_text)
+        for term in _REQUIREMENT_TERMS
+    ):
+        score += 3
+    if procedure_query and any(
+        re.search(rf"(?<!\w){re.escape(term)}(?!\w)", document_text)
+        for term in _PROCEDURE_TERMS
+    ):
+        score += 3
+    return score
 
 
 def retrieve(question: str, route_source: str | None) -> list[dict]:
@@ -325,6 +359,7 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
 
         distance = float(distance)
         overlap = lexical_overlap(question, document)
+        intent = intent_match(question, document)
 
         if distance > threshold:
             continue
@@ -338,9 +373,10 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
             "metadata": metadata or {},
             "distance": distance,
             "overlap": overlap,
+            "intent": intent,
         })
 
-    candidates.sort(key=lambda x: (x["distance"], -x["overlap"]))
+    candidates.sort(key=lambda x: (-x["intent"], x["distance"], -x["overlap"]))
 
     return candidates[:FINAL_CONTEXT_K]
 
@@ -376,6 +412,8 @@ PENTING: Sebelum menjawab, tentukan apakah pertanyaan dari pengguna adalah perta
 
 1. JIKA PERTANYAAN AKADEMIK KAMPUS:
    - Jawab HANYA berdasarkan informasi faktual di CONTEXT.
+     - Jika pertanyaan meminta "syarat" atau "persyaratan", jawab hanya daftar syarat/dokumen/ketentuannya. Jangan menjelaskan tata cara atau langkah pengisian kecuali kakak memang menanyakannya.
+     - Jika pertanyaan meminta "cara", "tata cara", atau "prosedur", jawab hanya langkah-langkahnya dan jangan menggantinya dengan daftar persyaratan.
    - JIKA informasi yang dicari TIDAK ADA di CONTEXT, kamu WAJIB menjawab PERSIS: "Maaf kak, informasi yang kamu tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha ya!" (Jangan tambahkan informasi lain).
    - JIKA pertanyaan tidak spesifik mengenai jadwal penerimaan mahasiswa baru (PMB), Cantumkan tanggal pendaftaran gelombang 1, 2, 3.
    
@@ -383,13 +421,14 @@ PENTING: Sebelum menjawab, tentukan apakah pertanyaan dari pengguna adalah perta
    - JANGAN gunakan pesan "Maaf kak..." seperti di atas.
    - ABAIKAN CONTEXT sepenuhnya. Jawablah pertanyaan pengguna menggunakan pengetahuan umummu selayaknya AI yang pintar.
    - Jika pengguna hanya menyapa "halo", "selamat pagi/siang/sore/malam" balas sapaannya, jika salam "assalamualaikum" balas dengan "Waalaikum salam", lalu tawarkan bantuan seputar PMB, KRS, atau biaya.
+   - Jika pengguna tidak menyapa atau mengucap salam, kamu JANGAN memberikan sapaan atau salam.
 
 ATURAN LAINNYA:
 - Jika pertanyaan tidak spesifik (seperti "saya ingin bertanya", "min mau nanya", dsb), jawablah dengan: "Boleh kak! Silakan tanyakan lebih spesifik mengenai PMB, KRS, biaya, atau jadwal ya!"
 - Jika menjawab dari context, pertahankan angka, tanggal, nama, syarat, atau biaya sesuai isi context.
 - Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
 - DILARANG menyebut nama file, metadata internal, skor similarity, routing, chunk, atau proses RAG.
-- GUNAKAN kata "kak" atau "kakak" disetiap kalimat, JANGAN GUNAKAN kata "Kamu".
+- HARUS MENGGUNAKAN kata "kak" atau "kakak" disetiap kalimat.
 """
 
 
