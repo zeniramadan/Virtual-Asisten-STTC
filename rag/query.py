@@ -72,6 +72,8 @@ _ABBREVIATION_ALIASES = (
     (r"\bk\s*\.??\s*p\s*\.??\s*r\s*\.??\s*s\s*\.??\b", "KPRS kartu perubahan rencana studi"),
 )
 
+_ADDRESS_TERMS = {"min", "minci", "kak", "kakak"}
+
 
 def normalize_abbreviations(text: str) -> str:
     for pattern, replacement in _ABBREVIATION_ALIASES:
@@ -84,6 +86,11 @@ def normalize_query(question: str) -> str:
     q = re.sub(r"\s+", " ", q)
     q = normalize_abbreviations(q)
     q = re.sub(r"\s+", " ", q).strip()
+
+    q = " ".join(
+        word for word in q.split()
+        if word.lower().strip("!?.,") not in _ADDRESS_TERMS
+    )
 
     q = re.sub(r"\bgelombang\s+i\b", "gelombang 1", q, flags=re.I)
     q = re.sub(r"\bgelombang\s+ii\b", "gelombang 2", q, flags=re.I)
@@ -434,6 +441,7 @@ ATURAN WAJIB UNTUK SEMUA JAWABAN:
 - HARUS menggunakan kata "kak" atau "kakak" di SETIAP kalimat! DILARANG menggunakan kata "Kamu".
 - Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
 - JANGAN PERNAH menyebutkan kata teknis seperti "context", "metadata", "chunk", atau "RAG".
+- JANGAN menyebut nomor bagian internal seperti "CHUNK 1", "CHUNK 5", atau "CHUNK 6". Langsung sebutkan informasi dan tanggalnya.
 """
 
 def build_user_prompt(question: str, context: str) -> str:
@@ -453,6 +461,16 @@ Jawab langsung pertanyaan tersebut.
 
 def clean_output(text: str) -> str:
     text = str(text or "").strip()
+
+    text = re.sub(
+        r"\s+(?:di|pada|dalam)\s+(?:CHUNK\s+\d+\s*(?:,|dan)?\s*)+",
+        " ",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"\bCHUNK\s+\d+\b", "", text, flags=re.I)
+    text = re.sub(r"\s+([,:;.!?])", r"\1", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
 
     text = re.sub(
         r"\[(?:Sumber|Konteks|Bagian|Sumber internal):[^\]]*\]\s*",
