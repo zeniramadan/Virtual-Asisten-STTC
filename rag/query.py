@@ -558,30 +558,30 @@ def ask_minci(question: str) -> str:
         print(context)
         print("=" * 70)
 
-        try:
-            # PENTING: Gunakan format ini agar Ollama menyuntikkan template chat Llama 3.2 secara benar
-            response = ollama.chat(
-                model=CHAT_MODEL,
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": SYSTEM_PROMPT
-                    },
-                    {
-                        "role": "user", 
-                        "content": build_user_prompt(question, context)
-                    },
-                ],
-                options={
-                    "temperature": 0.1,    # Sudah benar (rendah agar konsisten)
-                    "num_predict": 1024,
-                    # Tambahkan parameter di bawah ini jika model masih suka tidak patuh:
-                    # "top_p": 0.9,
+    try:
+        # PENTING: Gunakan format ini agar Ollama menyuntikkan template chat Llama 3.2 secara benar
+        response = ollama.chat(
+            model=CHAT_MODEL,
+            messages=[
+                {
+                    "role": "system", 
+                    "content": SYSTEM_PROMPT
                 },
-            )
-        except Exception as exc:
-            if DEBUG: print(f"[LLM] error: {exc}")
-            return "Maaf kak, sistem Minci sedang gangguan. Coba lagi nanti ya!"
+                {
+                    "role": "user", 
+                    "content": build_user_prompt(question, context)
+                },
+            ],
+            options={
+                "temperature": 0.1,    # Sudah benar (rendah agar konsisten)
+                "num_predict": 1024,
+                # Tambahkan parameter di bawah ini jika model masih suka tidak patuh:
+                # "top_p": 0.9,
+            },
+        )
+    except Exception as exc:
+        if DEBUG: print(f"[LLM] error: {exc}")
+        return "Maaf kak, sistem Minci sedang gangguan. Coba lagi nanti ya!"
 
 
     raw_answer = response.get("message", {}).get("content", "")
