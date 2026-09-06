@@ -3,3 +3,9 @@ py -m uvicorn app:app --host 0.0.0.0 --port 8000
 
 #ngrok
 ngrok http 8000
+
+Catatan:
+1. test.py : udah benerin bug dan di kasih conversation
+2. backup.py : versi test sebelum di kasih conversation
+3. query.py belum di apa-apain
+4. app.py : belum di kasih conversation 
