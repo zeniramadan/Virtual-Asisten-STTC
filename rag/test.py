@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections import Counter
+import time
+from collections import Counter, defaultdict
 
 import chromadb
 import ollama
@@ -21,12 +22,22 @@ CHROMA_DB_DIR = os.path.join(BASE_DIR, "database", "chroma_db")
 COLLECTION_NAME = "minci_dokumen"
 
 EMBED_MODEL = "bge-m3"
-CHAT_MODEL = "llama3.2"
+CHAT_MODEL = "qwen2.5:3b"
 
 RETRIEVAL_K = 20
 FINAL_CONTEXT_K = 8
 MAX_DISTANCE = 0.60
-ROUTED_MAX_DISTANCE = 0.58
+# Sebelumnya 0.58 -- LEBIH KETAT dari MAX_DISTANCE global, padahal query yang
+# sampai sini sudah lolos routing (artinya topik/dokumennya sudah "dijamin"
+# benar oleh where-filter di ChromaDB). Ambang di sini seharusnya LEBIH
+# LONGGAR, bukan lebih ketat -- distance gate di jalur routed cuma perlu jaga
+# dari chunk yang benar-benar tidak nyambung SAMA SEKALI di dalam dokumen yang
+# sama, bukan menyaring ketepatan topik (itu sudah tugas routing).
+# Akibat nilai lama (0.58): query pendek/generik seperti "syarat pendaftaran"
+# atau "pendaftaran" saja sering py py py punya distance ~0.6-0.7 ke chunk
+# detail (daftar dokumen syarat) -- lolos MAX_DISTANCE global tapi kandas di
+# sini, jadi context selalu kosong -> selalu fallback walau routing-nya benar.
+ROUTED_MAX_DISTANCE = 0.85
 DEBUG = True
 
 # Variabel FALLBACK manual dihapus karena sekarang diserahkan ke model
@@ -65,12 +76,14 @@ _NUMBER_WORDS = {
 }
 
 _ABBREVIATION_ALIASES = (
-    (r"\bp\s*\.?\s*m\s*\.?\s*b\s*\.?\b", "PMB penerimaan mahasiswa baru"),
-    (r"\bk\s*\.?\s*r\s*\.?\s\s*\.?\b", "KRS kartu rencana studi"),
-    (r"\bp\s*\.?\s*r\s*\.?\s*o\s*\.?\s*d\s*\.?\s*i\s*\.?\b", "PRODI program studi"),
-    (r"\bu\s*\.??\s*k\s*\.??\s*m\s*\.??\b", "UKM unit kegiatan mahasiswa"),
+    (r"\bp\s*\.?\s*m\s*\.?\s*b\s*\.?\b", "PMB penerimaan mahasiswa baru\n"),
+    (r"\bk\s*\.?\s*r\s*\.?\s\s*\.?\b", "KRS kartu rencana studi\n"),
+    (r"\bp\s*\.?\s*r\s*\.?\s*o\s*\.?\s*d\s*\.?\s*i\s*\.?\b", "PRODI program studi\n"),
+    (r"\bu\s*\.??\s*k\s*\.??\s*m\s*\.??\b", "UKM unit kegiatan mahasiswa\n"),
     (r"\bk\s*\.??\s*p\s*\.??\s*r\s*\.??\s*s\s*\.??\b", "KPRS kartu perubahan rencana studi"),
 )
+
+_ADDRESS_TERMS = {"min", "minci", "kak", "kakak"}
 
 
 def normalize_abbreviations(text: str) -> str:
@@ -84,6 +97,11 @@ def normalize_query(question: str) -> str:
     q = re.sub(r"\s+", " ", q)
     q = normalize_abbreviations(q)
     q = re.sub(r"\s+", " ", q).strip()
+
+    q = " ".join(
+        word for word in q.split()
+        if word.lower().strip("!?.,") not in _ADDRESS_TERMS
+    )
 
     q = re.sub(r"\bgelombang\s+i\b", "gelombang 1", q, flags=re.I)
     q = re.sub(r"\bgelombang\s+ii\b", "gelombang 2", q, flags=re.I)
@@ -144,17 +162,23 @@ def is_chitchat(question: str) -> bool:
     return False
 
 
-CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan.
+CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
 
-Ini pesan basa-basi (sapaan/ucapan terima kasih/obrolan ringan), BUKAN pertanyaan akademik.
-Balas SINGKAT (1-2 kalimat) dan natural sesuai basa-basinya.
-- Jika sapaan ("halo", "selamat pagi"), balas sapaannya lalu tawarkan bantuan seputar PMB, KRS, atau biaya.
-- Jika salam ("assalamualaikum"), balas "Waalaikumsalam kak!" lalu tawarkan bantuan.
-- Jika ucapan terima kasih ("makasih"), balas "Sama-sama kak!" atau sejenisnya.
-- Jika pertanyaan tidak spesifik ("mau nanya", "ingin bertanya"), jawab "Boleh kak! Silakan tanyakan lebih spesifik mengenai PMB, KRS, biaya, atau jadwal ya!"
-- Gunakan kata "kak" atau "kakak", JANGAN gunakan kata "Kamu" untuk memanggil pengguna.
-JANGAN mengarang info akademik apapun di sini."""
+TUGAS UTAMA:
+Jawab sapaan, salam, ucapan terima kasih, atau obrolan ringan (chitchat) dari pengguna dengan SINGKAT (maksimal 2 kalimat) dan super natural!
 
+ATURAN BALASAN SESUAI KONTEKS:
+1. Jika pengguna MENYAPA (halo, hai, pagi, siang, sore, malam), balas sapaannya dengan ceria, lalu tawarkan bantuan seputar PMB, KRS, atau biaya.
+2. Jika pengguna MENGUCAP SALAM (assalamualaikum), wajib balas "Waalaikumsalam kak!" lalu tawarkan bantuan.
+3. Jika pengguna berterima kasih (makasih, thank you), balas dengan "Sama-sama kak! Senang bisa bantu."
+4. Jika pengguna BERTANYA HAL LAIN (seperti "lagi apa?", "kamu siapa?", "mau nanya"), jawab sesuai pertanyaan ringan mereka dengan gaya santai Gen-Z, lalu arahkan kembali agar mereka bertanya tentang PMB, KRS, atau biaya.
+
+KATA KUNCI LARANGAN KERAS:
+- HARUS menggunakan kata "kak" atau "kakak" di setiap kalimat!
+- DILARANG KERAS menggunakan kata "Kamu" atau "Anda" saat menyapa pengguna!
+- JANGAN PERNAH memberikan jawaban template "Sama-sama" jika pengguna tidak sedang berterima kasih!
+- JANGAN mengarang atau memberikan informasi akademik palsu di sini!
+"""
 
 # ============================================================
 # ROUTING
@@ -199,10 +223,7 @@ def detect_route(question: str) -> tuple[str | None, str]:
     words = set(q.split())
     requirement_words = {"syarat", "persyaratan", "dokumen", "berkas"}
     krs_words = {"krs", "perwalian"}
-    registration_words = {
-        "pendaftaran", "mendaftar", "daftar", "pmb", "masuk",
-        "calon", "mahasiswa",
-    }
+    registration_words = {"pendaftaran", "mendaftar", "daftar", "pmb", "calon", "mahasiswa", "masuk"}
 
     if words & requirement_words and words & krs_words:
         return "KRS.docx", "prioritas syarat KRS/perwalian"
@@ -276,6 +297,13 @@ _STOPWORDS = {
     "cipasung", "kampus", "informasi", "nya",
 }
 
+_REQUIREMENT_TERMS = {
+    "syarat", "persyaratan", "dokumen", "berkas", "ketentuan",
+}
+_PROCEDURE_TERMS = {
+    "cara", "tata cara", "langkah", "prosedur", "mengisi", "pengisian",
+}
+
 
 def meaningful_tokens(text: str) -> set[str]:
     text = normalize_abbreviations(text)
@@ -287,6 +315,41 @@ def meaningful_tokens(text: str) -> set[str]:
 
 def lexical_overlap(question: str, document: str) -> int:
     return len(meaningful_tokens(question) & meaningful_tokens(document))
+
+
+def intent_match(question: str, document: str) -> int:
+    """Prioritaskan section dokumen yang sesuai dengan intent pertanyaan."""
+    question_text = _route_text(normalize_query(question))
+    document_text = _route_text(document)
+
+    requirement_query = bool(
+        meaningful_tokens(question_text) & _REQUIREMENT_TERMS
+    )
+    procedure_query = bool(
+        meaningful_tokens(question_text)
+        & {"cara", "langkah", "prosedur", "mengisi", "pengisian"}
+    )
+    registration_query = bool(
+        meaningful_tokens(question_text)
+        & {"pendaftaran", "mendaftar", "daftar", "masuk"}
+    )
+
+    score = 0
+    if requirement_query and any(
+        re.search(rf"(?<!\w){re.escape(term)}(?!\w)", document_text)
+        for term in _REQUIREMENT_TERMS
+    ):
+        score += 3
+    if procedure_query and any(
+        re.search(rf"(?<!\w){re.escape(term)}(?!\w)", document_text)
+        for term in _PROCEDURE_TERMS
+    ):
+        score += 3
+    if registration_query and "pendaftaran" in document_text:
+        score += 2
+    if registration_query and "persyaratan administrasi pendaftaran" in document_text:
+        score += 6
+    return score
 
 
 def retrieve(question: str, route_source: str | None) -> list[dict]:
@@ -317,6 +380,11 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
     q_tokens = meaningful_tokens(question)
     candidates = []
 
+    if DEBUG:
+        print(f"\n[RETRIEVE] where={route_source or '(global, semua dokumen)'} | threshold={threshold}")
+        if not documents:
+            print("[RETRIEVE] ChromaDB tidak mengembalikan dokumen apapun (where-filter mungkin 0 hasil, atau collection kosong).")
+
     for doc_id, document, metadata, distance in zip(
         ids, documents, metadatas, distances
     ):
@@ -325,11 +393,24 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
 
         distance = float(distance)
         overlap = lexical_overlap(question, document)
+        intent = intent_match(question, document)
+        source = (metadata or {}).get("source", "?")
 
-        if distance > threshold:
+        lolos_distance = distance <= threshold
+        if DEBUG:
+            status = "✅ lolos" if lolos_distance else "❌ DIBUANG (distance > threshold)"
+            print(f"    distance={distance:.4f}  overlap={overlap}  intent={intent}  source={source}  -> {status}")
+            print(f"       {document[:120].replace(chr(10), ' ')}...")
+
+        if not lolos_distance:
             continue
 
-        if len(q_tokens) >= 2 and overlap < 1:
+        # Route sudah membatasi dokumen ke sumber yang relevan. Jangan buang
+        # chunk teratas hanya karena bentuk katanya berbeda, misalnya
+        # "syarat" vs "persyaratan" atau "daftar" vs "pendaftaran".
+        if route_source is None and len(q_tokens) >= 2 and overlap < 1:
+            if DEBUG:
+                print(f"       -> DIBUANG (overlap gate, tidak ada kata kunci konten sama; global search)")
             continue
 
         candidates.append({
@@ -338,9 +419,10 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
             "metadata": metadata or {},
             "distance": distance,
             "overlap": overlap,
+            "intent": intent,
         })
 
-    candidates.sort(key=lambda x: (x["distance"], -x["overlap"]))
+    candidates.sort(key=lambda x: (-x["intent"], x["distance"], -x["overlap"]))
 
     return candidates[:FINAL_CONTEXT_K]
 
@@ -370,28 +452,50 @@ def build_context(chunks: list[dict]) -> str:
 # LLM PROMPT
 # ============================================================
 
-SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Gen-Z, tapi sopan.
+# Fallback DETERMINISTIK -- dipakai langsung oleh KODE (bukan diminta ke model)
+# begitu chunks kosong. Model tidak pernah diberi "pilihan" untuk menjawab ini,
+# jadi tidak ada lagi ruang bagi model buat salah menyimpulkan context kosong
+# padahal isinya ada.
+FALLBACK_TEXT = "Maaf kak, informasi yang kamu tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha ya!"
 
-PENTING: Sebelum menjawab, tentukan apakah pertanyaan dari pengguna adalah pertanyaan AKADEMIK KAMPUS (PMB (Penerimaan Mahasiswa Baru), KRS, biaya, dsb) atau pertanyaan UMUM / BASA-BASI (seputar pengetahuan umum, AI, coding, sapaan, dsb).
+# System prompt ini HANYA dipakai ketika chunks SUDAH DIPASTIKAN ADA ISINYA oleh
+# kode (lihat ask_minci). Makanya KONDISI 1 (context kosong) sengaja DIHAPUS
+# dari sini -- model tidak perlu lagi menebak/mengecek apakah context kosong,
+# karena kalau prompt ini yang dipakai, context SELALU ada isinya. Ini
+# menghilangkan sumber kesalahan sebelumnya: model 3B yang kadang salah
+# menyimpulkan context kosong padahal datanya ada persis di depannya.
+#
+# CATATAN PERUBAHAN PERILAKU: KONDISI 3 (jawab pertanyaan umum di luar kampus
+# pakai pengetahuan umum model, mis. matematika/sejarah) ikut dihapus di sini.
+# Sekarang pertanyaan di luar cakupan dokumen kampus akan selalu jatuh ke
+# FALLBACK_TEXT (chunks kosong -> tidak pernah sampai ke LLM sama sekali),
+# BUKAN dijawab pakai pengetahuan umum model seperti sebelumnya. Ini konsisten
+# dengan semua perbaikan gate/routing yang sudah kita buat sebelumnya (supaya
+# Minci tidak "mengarang" jawaban di luar dokumen resmi kampus). Kalau kamu
+# justru MASIH mau Minci bisa jawab pertanyaan umum di luar kampus, kasih tau
+# saya -- itu perlu jalur terpisah lagi (bukan sekadar taruh balik ke sini),
+# karena kalau taruh di sini lagi, prompt ini jadi butuh model MENEBAK lagi
+# kapan harus pakai pengetahuan umum vs kapan harus attach ke context -- balik
+# ke masalah yang sama.
+SYSTEM_PROMPT_WITH_CONTEXT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
 
-1. JIKA PERTANYAAN AKADEMIK KAMPUS:
-   - Jawab HANYA berdasarkan informasi faktual di CONTEXT.
-   - JIKA informasi yang dicari TIDAK ADA di CONTEXT, kamu WAJIB menjawab PERSIS: "Maaf kak, informasi yang kamu tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha ya!" (Jangan tambahkan informasi lain).
-   - JIKA pertanyaan tidak spesifik mengenai jadwal penerimaan mahasiswa baru (PMB), Cantumkan tanggal pendaftaran gelombang 1, 2, 3.
-   
-2. JIKA PERTANYAAN UMUM / BASA-BASI (Di luar urusan kampus):
-   - JANGAN gunakan pesan "Maaf kak..." seperti di atas.
-   - ABAIKAN CONTEXT sepenuhnya. Jawablah pertanyaan pengguna menggunakan pengetahuan umummu selayaknya AI yang pintar.
-   - Jika pengguna hanya menyapa "halo", "selamat pagi/siang/sore/malam" balas sapaannya, jika salam "assalamualaikum" balas dengan "Waalaikum salam", lalu tawarkan bantuan seputar PMB, KRS, atau biaya.
+CONTEXT di bawah ini SUDAH DIPASTIKAN BERISI DATA PANDUAN YANG RELEVAN dengan pertanyaan. Kamu WAJIB menjawab dari situ -- JANGAN PERNAH bilang "tidak ditemukan" atau "tidak ada di panduan" untuk pertanyaan ini, karena datanya PASTI ada di CONTEXT.
 
-ATURAN LAINNYA:
-- Jika pertanyaan tidak spesifik (seperti "saya ingin bertanya", "min mau nanya", dsb), jawablah dengan: "Boleh kak! Silakan tanyakan lebih spesifik mengenai PMB, KRS, biaya, atau jadwal ya!"
-- Jika menjawab dari context, pertahankan angka, tanggal, nama, syarat, atau biaya sesuai isi context.
+ATURAN JAWABAN:
+- Jawab pertanyaan pengguna HANYA berdasarkan informasi faktual yang tertulis di dalam CONTEXT tersebut.
+- Jika pertanyaan meminta "syarat", berikan DAFTAR SYARAT saja dari context. Jangan jelaskan tata cara.
+- Jika pertanyaan meminta "cara", berikan LANGKAH-LANGKAH saja dari context. Jangan berikan daftar syarat.
+- JIKA pertanyaan meminta "syarat", "persyaratan" atau "pendaftaran", kamu WAJIB DAN HARUS MENULISKAN SEMUA DAFTAR SYARAT YANG ADA DI CONTEXT SECARA LENGKAP!
+- Jika pertanyaan tidak spesifik mengenai jadwal PMB, cantumkan tanggal pendaftaran gelombang 1, 2, dan 3 yang tertera di context.
+- Jika pertanyaan meminta "seleksi" berikan jadwal seleksi penerimaan mahasiswa baru yang ada di context.
+- Jika pertanyaan meminta "biaya", "bayar", atau "nominal", berikan SEMUA INFORMASI BESERTA KETERANGANNYA.
+
+ATURAN WAJIB UNTUK SEMUA JAWABAN:
+- HARUS menggunakan kata "kak" atau "kakak" di SETIAP kalimat! DILARANG menggunakan kata "Kamu".
 - Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
-- DILARANG menyebut nama file, metadata internal, skor similarity, routing, chunk, atau proses RAG.
-- GUNAKAN kata "kak" atau "kakak" disetiap kalimat, JANGAN GUNAKAN kata "Kamu" untuk memanggil pengguna.
+- JANGAN PERNAH menyebutkan kata teknis seperti "context", "metadata", "chunk", atau "RAG".
+- JANGAN menyebut nomor bagian internal seperti "CHUNK 1", "CHUNK 5", atau "CHUNK 6". Langsung sebutkan informasi dan tanggalnya.
 """
-
 
 def build_user_prompt(question: str, context: str) -> str:
     return f"""CONTEXT:
@@ -412,6 +516,16 @@ def clean_output(text: str) -> str:
     text = str(text or "").strip()
 
     text = re.sub(
+        r"\s+(?:di|pada|dalam)\s+(?:CHUNK\s+\d+\s*(?:,|dan)?\s*)+",
+        " ",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"\bCHUNK\s+\d+\b", "", text, flags=re.I)
+    text = re.sub(r"\s+([,:;.!?])", r"\1", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+
+    text = re.sub(
         r"\[(?:Sumber|Konteks|Bagian|Sumber internal):[^\]]*\]\s*",
         "",
         text,
@@ -420,15 +534,86 @@ def clean_output(text: str) -> str:
 
     for filename in ("PMB.docx", "KRS.docx", "BIAYA.docx", "KALENDER.docx"):
         text = text.replace(filename, "")
-
+        
+    # 3. Ubah semua bullet poin fisik (• atau *) menjadi "-" tanpa merusak teks
+    text = text.replace("•", "-")
+    text = text.replace("▪", "-")
+    text = text.replace("⁃", "-")
+    
     return text.strip()
-
 
 # ============================================================
 # API UTAMA
 # ============================================================
 
-def ask_minci(question: str) -> str:
+# ============================================================
+# RIWAYAT PERCAKAPAN (per user) -- auto-hapus setelah 1 jam
+# ============================================================
+# Disimpan di MEMORY proses (dict biasa), BUKAN database -- jadi hilang kalau
+# server di-restart. Ini cukup untuk kebutuhan "ingat obrolan barusan", bukan
+# riwayat permanen. Kalau nanti butuh riwayat yang tahan restart, ganti
+# _conversation_history ini dengan penyimpanan eksternal (redis/db), struktur
+# fungsi di bawah tidak perlu berubah banyak.
+
+HISTORY_TTL_SECONDS = 3600      # 1 jam -- pesan lebih tua dari ini otomatis dibuang
+MAX_HISTORY_TURNS = 6           # maksimal 6 pasang (user+asisten) terakhir yang dikirim ke model
+
+# key = user_id (mis. nomor WhatsApp), value = list pesan {"role","content","ts"}
+_conversation_history: dict[str, list[dict]] = defaultdict(list)
+
+
+def _prune_expired_history(now: float | None = None) -> None:
+    """
+    Buang semua pesan riwayat yang sudah lebih tua dari HISTORY_TTL_SECONDS,
+    untuk SEMUA user sekaligus. Dipanggil di awal setiap ask_minci(), jadi
+    "auto-hapus" ini terjadi LAZY (saat ada request baru) -- tidak perlu
+    thread/scheduler terpisah. User yang riwayatnya jadi kosong total langsung
+    dibuang dari dict supaya memory tidak membengkak selama server jalan lama.
+    """
+    now = now if now is not None else time.time()
+    empty_users = []
+    for user_id, messages in _conversation_history.items():
+        fresh = [m for m in messages if now - m["ts"] <= HISTORY_TTL_SECONDS]
+        if fresh:
+            _conversation_history[user_id] = fresh
+        else:
+            empty_users.append(user_id)
+    for user_id in empty_users:
+        del _conversation_history[user_id]
+
+
+def _get_history_messages(user_id: str) -> list[dict]:
+    """Riwayat user (yang masih berlaku) dalam format siap kirim ke ollama.chat."""
+    messages = _conversation_history.get(user_id, [])
+    trimmed = messages[-(MAX_HISTORY_TURNS * 2):]
+    return [{"role": m["role"], "content": m["content"]} for m in trimmed]
+
+
+def _remember(user_id: str, role: str, content: str) -> None:
+    _conversation_history[user_id].append({"role": role, "content": content, "ts": time.time()})
+
+
+_FOLLOWUP_HINT_WORDS = {
+    "itu", "tadi", "tersebut", "lanjut", "terus", "trus", "kalau", "gimana",
+    "berarti", "jadi", "nah", "terusan", "lah", "dong",
+}
+
+
+def _looks_like_followup(question: str) -> bool:
+    """
+    Heuristik ringan: pertanyaan pendek (<=4 kata bermakna) atau mengandung
+    kata rujukan ("itu"/"tadi"/"kalau"/dst) kemungkinan besar bergantung pada
+    konteks obrolan sebelumnya -- mis. user tanya "biaya semester 1 berapa?"
+    lalu lanjut "kalau semester 2?" tanpa menyebut ulang kata "biaya"/"semester".
+    Kalau ini True, pertanyaan sebelumnya ikut disertakan saat RETRIEVAL
+    (BUKAN saat menjawab -- jawaban tetap fokus ke pertanyaan asli) supaya
+    pencarian dokumen tidak "buta konteks".
+    """
+    words = set(re.findall(r"[a-z0-9]+", question.lower()))
+    return len(words) <= 4 or bool(words & _FOLLOWUP_HINT_WORDS)
+
+
+def ask_minci(question: str, user_id: str = "default") -> str:
     """
     Pure RAG:
         query -> routing -> retrieval -> gate -> context -> model
@@ -437,11 +622,15 @@ def ask_minci(question: str) -> str:
     """
     question = normalize_query(question)
 
+    # Auto-hapus riwayat yang sudah lebih dari 1 jam (untuk SEMUA user, lazy cleanup)
+    _prune_expired_history()
+    history_messages = _get_history_messages(user_id)
+
     # Tetap sediakan fallback error ringan jika pertanyaan benar-benar kosong
     if not question:
         return "Ada yang bisa Minci bantu, kak?"
 
-    # --- Chitchat bypass: basa-basi langsung ke model TANPA RAG ---
+       # --- Chitchat bypass: basa-basi langsung ke model TANPA RAG ---
     if is_chitchat(question):
         if DEBUG:
             print(f"\n[CHITCHAT] '{question}' terdeteksi basa-basi -> skip RAG")
@@ -450,20 +639,43 @@ def ask_minci(question: str) -> str:
                 model=CHAT_MODEL,
                 messages=[
                     {"role": "system", "content": CHITCHAT_SYSTEM_PROMPT},
+                    *history_messages,
                     {"role": "user", "content": question},
                 ],
-                options={"temperature": 0.3, "num_predict": 256},
+                options={
+                    "temperature": 0.4,     # Naik sedikit ke 0.4 agar gaya Gen-Z nya lebih natural & tidak kaku
+                    "top_p": 0.9,           # Membatasi pilihan kata agar tetap masuk akal
+                    "num_predict": 100,     # Batasan respons chitchat pendek (maksimal ~100 token)
+                },
             )
-            return clean_output(response.get("message", {}).get("content", ""))
+            answer = clean_output(response.get("message", {}).get("content", ""))
         except Exception as exc:
             if DEBUG: print(f"[LLM] chitchat error: {exc}")
-            return "Halo kak! Ada yang bisa Minci bantu?"
+            answer = "Halo kak! Ada yang bisa Minci bantu?"
+
+        _remember(user_id, "user", question)
+        _remember(user_id, "assistant", answer)
+        return answer
+
 
     if _collection.count() == 0:
         if DEBUG: print("[RAG] collection kosong")
         # Biarkan model merespons dengan context kosong
 
-    route_source, route_reason = detect_route(question)
+    # Kalau pertanyaan ini kelihatan seperti lanjutan obrolan sebelumnya (pendek
+    # atau ada kata rujukan), gabungkan dengan pertanyaan user TERAKHIR khusus
+    # untuk keperluan RETRIEVAL saja -- supaya pencarian dokumen tetap "nyambung"
+    # walau pertanyaan barunya sendiri tidak menyebut ulang kata kuncinya.
+    # Jawaban ke user tetap berdasarkan `question` yang asli, bukan versi gabungan ini.
+    retrieval_query = question
+    if _looks_like_followup(question) and history_messages:
+        previous_user_questions = [m["content"] for m in history_messages if m["role"] == "user"]
+        if previous_user_questions:
+            retrieval_query = f"{previous_user_questions[-1]} {question}"
+            if DEBUG:
+                print(f"[FOLLOWUP] Query retrieval digabung jadi: {retrieval_query!r}")
+
+    route_source, route_reason = detect_route(retrieval_query)
 
     if DEBUG:
         print("\n" + "=" * 70)
@@ -473,12 +685,27 @@ def ask_minci(question: str) -> str:
         print("=" * 70)
 
     try:
-        chunks = retrieve(question, route_source=route_source)
+        chunks = retrieve(retrieval_query, route_source=route_source)
     except Exception as exc:
         if DEBUG: print(f"[RAG] retrieval error: {exc}")
         chunks = []
 
-    # Blok 'if not chunks' manual dihapus, sehingga konteks kosong tetap dikirim ke model
+    # --- Keputusan "ada data atau tidak" diambil di KODE, bukan diserahkan
+    # ke model. Sebelumnya context kosong tetap dikirim ke LLM dengan harapan
+    # dia "membaca" instruksi KONDISI 1 dan menyimpulkan sendiri -- tapi itu
+    # juga berarti ketika context ADA ISINYA, model tetap harus "membuktikan
+    # sendiri" bahwa ini bukan kasus KONDISI 1, dan model 3B kadang salah
+    # simpul (lihat kasus "syarat pendaftaran" yang tetap fallback padahal
+    # context-nya lengkap). Dengan cek eksplisit di sini, model HANYA PERNAH
+    # melihat prompt yang isinya SUDAH DIPASTIKAN ada datanya, dan bahkan tidak
+    # pernah dipanggil sama sekali kalau memang tidak ada apa-apa untuk dijawab.
+    if not chunks:
+        if DEBUG:
+            print("[RAG] Tidak ada chunk relevan -> fallback deterministik, LLM TIDAK dipanggil.")
+        _remember(user_id, "user", question)
+        _remember(user_id, "assistant", FALLBACK_TEXT)
+        return FALLBACK_TEXT
+
     context = build_context(chunks)
 
     if DEBUG:
@@ -489,15 +716,25 @@ def ask_minci(question: str) -> str:
         print("=" * 70)
 
     try:
+        # PENTING: Gunakan format ini agar Ollama menyuntikkan template chat Llama 3.2 secara benar
         response = ollama.chat(
             model=CHAT_MODEL,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_prompt(question, context)},
+                {
+                    "role": "system", 
+                    "content": SYSTEM_PROMPT_WITH_CONTEXT
+                },
+                *history_messages,
+                {
+                    "role": "user", 
+                    "content": build_user_prompt(question, context)
+                },
             ],
             options={
-                "temperature": 0.1,
+                "temperature": 0.1,    # Sudah benar (rendah agar konsisten)
                 "num_predict": 1024,
+                # Tambahkan parameter di bawah ini jika model masih suka tidak patuh:
+                # "top_p": 0.9,
             },
         )
     except Exception as exc:
@@ -505,7 +742,13 @@ def ask_minci(question: str) -> str:
         return "Maaf kak, sistem Minci sedang gangguan. Coba lagi nanti ya!"
 
     raw_answer = response.get("message", {}).get("content", "")
+    if DEBUG:
+        print("\n[RAW LLM OUTPUT sebelum clean_output]")
+        print(raw_answer)
     answer = clean_output(raw_answer)
+
+    _remember(user_id, "user", question)
+    _remember(user_id, "assistant", answer)
 
     return answer
 

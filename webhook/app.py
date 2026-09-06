@@ -36,7 +36,7 @@ app = FastAPI(title="Minci WhatsApp Webhook")
 WA_VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN", "minci-verify-token")
 WA_ACCESS_TOKEN = os.getenv("WA_ACCESS_TOKEN")          # token akses WhatsApp Cloud API
 WA_PHONE_NUMBER_ID = os.getenv("WA_PHONE_NUMBER_ID")     # phone_number_id dari Meta App
-WA_API_VERSION = os.getenv("WA_API_VERSION", "v20.0")
+WA_API_VERSION = os.getenv("WA_API_VERSION", "v26.0")
 # ====================================
 
 WA_SEND_URL = f"https://graph.facebook.com/{WA_API_VERSION}/{WA_PHONE_NUMBER_ID}/messages"

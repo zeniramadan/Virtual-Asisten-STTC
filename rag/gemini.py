@@ -1,36 +1,40 @@
 """
 Pure RAG query.py untuk Minci.
-- Semua pertanyaan akademik melewati retrieval.
-- Routing memilih source ChromaDB.
-- Model SELALU dipanggil, bahkan ketika context kosong.
-- Fallback sepenuhnya di-handle oleh System Prompt Llama 3.2.
+- Menggunakan Google Gemini API untuk LLM Chat (mengambil API key dari environment variable).
+- ChromaDB & Embedding (bge-m3) tetap menggunakan Ollama secara lokal.
 """
 
 from __future__ import annotations
 import json
 import os
 import re
-from collections import Counter
+import time
+from collections import Counter, defaultdict
 
 import chromadb
 import ollama
+from google import genai
+from google.genai import types
+from dotenv import load_dotenv
 
+dotenv_path = os.path.join(os.path.dirname(__file__), "..", "webhook", ".env")
+load_dotenv(dotenv_path=dotenv_path)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHROMA_DB_DIR = os.path.join(BASE_DIR, "database", "chroma_db")
 COLLECTION_NAME = "minci_dokumen"
 
 EMBED_MODEL = "bge-m3"
-CHAT_MODEL = "llama3.2"  # Model Llama 3.2 terbaru yang cepat & gratis
+CHAT_MODEL = "gemini-3.5-flash-lite"
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 RETRIEVAL_K = 20
 FINAL_CONTEXT_K = 8
 MAX_DISTANCE = 0.60
-ROUTED_MAX_DISTANCE = 0.58
+ROUTED_MAX_DISTANCE = 0.85
 DEBUG = True
-
-# Variabel FALLBACK manual dihapus karena sekarang diserahkan ke model
-
 
 # ============================================================
 # CHROMADB
@@ -50,7 +54,7 @@ if DEBUG:
     print(
         f"[RAG] collection={COLLECTION_NAME} | "
         f"chunks={_collection.count()} | embedding={EMBED_MODEL} | "
-        f"chat_model={CHAT_MODEL}"
+        f"chat_model={CHAT_MODEL} (Gemini API)"
     )
 
 
@@ -212,10 +216,7 @@ def detect_route(question: str) -> tuple[str | None, str]:
     words = set(q.split())
     requirement_words = {"syarat", "persyaratan", "dokumen", "berkas"}
     krs_words = {"krs", "perwalian"}
-    registration_words = {
-        "pendaftaran", "mendaftar", "daftar", "pmb", "masuk",
-        "calon", "mahasiswa",
-    }
+    registration_words = {"pendaftaran", "mendaftar", "daftar", "pmb", "calon", "mahasiswa", "masuk"}
 
     if words & requirement_words and words & krs_words:
         return "KRS.docx", "prioritas syarat KRS/perwalian"
@@ -223,15 +224,6 @@ def detect_route(question: str) -> tuple[str | None, str]:
     if words & requirement_words and words & registration_words:
         return "PMB.docx", "prioritas syarat pendaftaran PMB"
 
-    # PRIORITAS KATA TANYA WAKTU: "kapan"/"tanggal"/"jadwal" HARUS menang
-    # duluan, sebelum scoring keyword biasa. Kenapa ini perlu: normalize_abbreviations()
-    # mengubah "pmb" jadi "PMB penerimaan mahasiswa baru" -- akibatnya frasa panjang
-    # ini ikut disisipkan ke teks query dan mendominasi skor Counter di bawah
-    # (bobotnya = jumlah kata di frasa, jadi "penerimaan mahasiswa baru" dapat
-    # bobot 3, sementara "kapan" cuma bobot 1). Tanpa aturan ini, pertanyaan
-    # "kapan pmb dibuka" selalu di-route paksa ke PMB.docx dan KALENDER.docx
-    # (tempat tanggal/jadwal sebenarnya disimpan) tidak pernah ikut dicari sama
-    # sekali karena routing pakai hard where-filter.
     time_words = {"kapan", "tanggal", "jadwal"}
     if words & time_words:
         return "KALENDER.docx", "prioritas kata tanya waktu (kapan/tanggal/jadwal)"
@@ -310,7 +302,6 @@ def lexical_overlap(question: str, document: str) -> int:
 
 
 def intent_match(question: str, document: str) -> int:
-    """Prioritaskan section dokumen yang sesuai dengan intent pertanyaan."""
     question_text = _route_text(normalize_query(question))
     document_text = _route_text(document)
 
@@ -320,6 +311,10 @@ def intent_match(question: str, document: str) -> int:
     procedure_query = bool(
         meaningful_tokens(question_text)
         & {"cara", "langkah", "prosedur", "mengisi", "pengisian"}
+    )
+    registration_query = bool(
+        meaningful_tokens(question_text)
+        & {"pendaftaran", "mendaftar", "daftar", "masuk"}
     )
 
     score = 0
@@ -333,6 +328,10 @@ def intent_match(question: str, document: str) -> int:
         for term in _PROCEDURE_TERMS
     ):
         score += 3
+    if registration_query and "pendaftaran" in document_text:
+        score += 2
+    if registration_query and "persyaratan administrasi pendaftaran" in document_text:
+        score += 6
     return score
 
 
@@ -364,6 +363,11 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
     q_tokens = meaningful_tokens(question)
     candidates = []
 
+    if DEBUG:
+        print(f"\n[RETRIEVE] where={route_source or '(global, semua dokumen)'} | threshold={threshold}")
+        if not documents:
+            print("[RETRIEVE] ChromaDB tidak mengembalikan dokumen apapun.")
+
     for doc_id, document, metadata, distance in zip(
         ids, documents, metadatas, distances
     ):
@@ -373,14 +377,20 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
         distance = float(distance)
         overlap = lexical_overlap(question, document)
         intent = intent_match(question, document)
+        source = (metadata or {}).get("source", "?")
 
-        if distance > threshold:
+        lolos_distance = distance <= threshold
+        if DEBUG:
+            status = "✅ lolos" if lolos_distance else "❌ DIBUANG (distance > threshold)"
+            print(f"    distance={distance:.4f}  overlap={overlap}  intent={intent}  source={source}  -> {status}")
+            print(f"       {document[:120].replace(chr(10), ' ')}...")
+
+        if not lolos_distance:
             continue
 
-        # Route sudah membatasi dokumen ke sumber yang relevan. Jangan buang
-        # chunk teratas hanya karena bentuk katanya berbeda, misalnya
-        # "syarat" vs "persyaratan" atau "daftar" vs "pendaftaran".
         if route_source is None and len(q_tokens) >= 2 and overlap < 1:
+            if DEBUG:
+                print(f"       -> DIBUANG (overlap gate, tidak ada kata kunci konten sama; global search)")
             continue
 
         candidates.append({
@@ -402,7 +412,6 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
 # ============================================================
 
 def build_context(chunks: list[dict]) -> str:
-    # Jika tidak ada chunk (kosong), kembalikan string yang memberi tahu model
     if not chunks:
         return "TIDAK ADA DATA PANDUAN YANG DITEMUKAN."
         
@@ -422,27 +431,23 @@ def build_context(chunks: list[dict]) -> str:
 # LLM PROMPT
 # ============================================================
 
-SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
+FALLBACK_TEXT = "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!"
 
-PENTING: Cek isi teks CONTEXT terlebih dahulu sebelum melihat PERTANYAAN!
+SYSTEM_PROMPT_WITH_CONTEXT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
 
-KONDISI 1 - JIKA CONTEXT BERISI TULISAN "TIDAK ADA DATA PANDUAN YANG DITEMUKAN.":
-- Kamu WAJIB dan HANYA BOLEH menjawab dengan kalimat persis seperti ini: "Maaf kak, informasi yang kamu tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha ya!"
-- DILARANG KERAS mengarang, menebak, atau menggunakan pengetahuan umummu untuk menjawab pertanyaan akademik seputar kampus jika context kosong!
+CONTEXT di bawah ini SUDAH DIPASTIKAN BERISI DATA PANDUAN YANG RELEVAN dengan pertanyaan. Kamu WAJIB menjawab dari situ -- JANGAN PERNAH bilang "tidak ditemukan" atau "tidak ada di panduan" untuk pertanyaan ini, karena datanya PASTI ada di CONTEXT.
 
-KONDISI 2 - JIKA CONTEXT BERISI DATA PANDUAN AKTIF:
+ATURAN JAWABAN:
 - Jawab pertanyaan pengguna HANYA berdasarkan informasi faktual yang tertulis di dalam CONTEXT tersebut.
 - Jika pertanyaan meminta "syarat", berikan DAFTAR SYARAT saja dari context. Jangan jelaskan tata cara.
 - Jika pertanyaan meminta "cara", berikan LANGKAH-LANGKAH saja dari context. Jangan berikan daftar syarat.
-- JIKA pertanyaan meminta "syarat" atau "persyaratan", kamu WAJIB DAN HARUS MENULISKAN SEMUA DAFTAR SYARAT YANG ADA DI CONTEXT SECARA LENGKAP! 
+- JIKA pertanyaan meminta "syarat", "persyaratan" atau "pendaftaran", kamu WAJIB DAN HARUS MENULISKAN SEMUA DAFTAR SYARAT YANG ADA DI CONTEXT SECARA LENGKAP!
 - Jika pertanyaan tidak spesifik mengenai jadwal PMB, cantumkan tanggal pendaftaran gelombang 1, 2, dan 3 yang tertera di context.
-_ Jika pertanyaan meminta "seleksi" berikan jadwal seleksi penerimaan mahasiswa baru yang ada di context.
-
-KONDISI 3 - JIKA PERTANYAAN ADALAH PERTANYAAN UMUM DI LUAR URUSAN KAMPUS (Contoh: matematika, sejarah, coding, AI):
-- ABAIKAN CONTEXT dan jawablah dengan pengetahuan umummu secara cerdas dan santai.
+- Jika pertanyaan meminta "seleksi" berikan jadwal seleksi penerimaan mahasiswa baru yang ada di context.
+- Jika pertanyaan meminta "biaya", "bayar", atau "nominal", berikan SEMUA INFORMASI BESERTA KETERANGANNYA.
 
 ATURAN WAJIB UNTUK SEMUA JAWABAN:
-- HARUS menggunakan kata "kak" atau "kakak" di SETIAP kalimat! DILARANG menggunakan kata "Kamu".
+- HARUS menggunakan kata "kak" atau "kakak"! DILARANG menggunakan kata "Kamu".
 - Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
 - JANGAN PERNAH menyebutkan kata teknis seperti "context", "metadata", "chunk", atau "RAG".
 - JANGAN menyebut nomor bagian internal seperti "CHUNK 1", "CHUNK 5", atau "CHUNK 6". Langsung sebutkan informasi dan tanggalnya.
@@ -486,58 +491,117 @@ def clean_output(text: str) -> str:
     for filename in ("PMB.docx", "KRS.docx", "BIAYA.docx", "KALENDER.docx"):
         text = text.replace(filename, "")
         
-    # 3. Ubah semua bullet poin fisik (• atau *) menjadi "-" tanpa merusak teks
     text = text.replace("•", "-")
     text = text.replace("▪", "-")
     text = text.replace("⁃", "-")
     
     return text.strip()
 
+
 # ============================================================
-# API UTAMA
+# RIWAYAT PERCAKAPAN (per user) -- auto-hapus setelah 1 jam
 # ============================================================
 
-def ask_minci(question: str) -> str:
-    """
-    Pure RAG:
-        query -> routing -> retrieval -> gate -> context -> model
+HISTORY_TTL_SECONDS = 3600
+MAX_HISTORY_TURNS = 6
 
-    Model SELALU dipanggil untuk menghasilkan jawaban.
-    """
+_conversation_history: dict[str, list[dict]] = defaultdict(list)
+
+
+def _prune_expired_history(now: float | None = None) -> None:
+    now = now if now is not None else time.time()
+    empty_users = []
+    for user_id, messages in _conversation_history.items():
+        fresh = [m for m in messages if now - m["ts"] <= HISTORY_TTL_SECONDS]
+        if fresh:
+            _conversation_history[user_id] = fresh
+        else:
+            empty_users.append(user_id)
+    for user_id in empty_users:
+        del _conversation_history[user_id]
+
+
+def _remember(user_id: str, role: str, content: str) -> None:
+    _conversation_history[user_id].append({"role": role, "content": content, "ts": time.time()})
+
+
+_FOLLOWUP_HINT_WORDS = {
+    "itu", "tadi", "tersebut", "lanjut", "terus", "trus", "kalau", "gimana",
+    "berarti", "jadi", "nah", "terusan", "lah", "dong",
+}
+
+
+def _looks_like_followup(question: str) -> bool:
+    words = set(re.findall(r"[a-z0-9]+", question.lower()))
+    return len(words) <= 4 or bool(words & _FOLLOWUP_HINT_WORDS)
+
+
+def ask_minci(question: str, user_id: str = "default") -> str:
     question = normalize_query(question)
 
-    # Tetap sediakan fallback error ringan jika pertanyaan benar-benar kosong
+    _prune_expired_history()
+    
+    # Ambil riwayat percakapan untuk dikonversi ke format Google GenAI contents/history
+    raw_history = _conversation_history.get(user_id, [])
+    trimmed_history = raw_history[-(MAX_HISTORY_TURNS * 2):]
+
     if not question:
         return "Ada yang bisa Minci bantu, kak?"
 
-       # --- Chitchat bypass: basa-basi langsung ke model TANPA RAG ---
+    # --- Chitchat bypass via Gemini API ---
     if is_chitchat(question):
         if DEBUG:
             print(f"\n[CHITCHAT] '{question}' terdeteksi basa-basi -> skip RAG")
         try:
-            response = ollama.chat(
-                model=CHAT_MODEL,
-                messages=[
-                    {"role": "system", "content": CHITCHAT_SYSTEM_PROMPT},
-                    {"role": "user", "content": question},
-                ],
-                options={
-                    "temperature": 0.4,     # Naik sedikit ke 0.4 agar gaya Gen-Z nya lebih natural & tidak kaku
-                    "top_p": 0.9,           # Membatasi pilihan kata agar tetap masuk akal
-                    "num_predict": 100,     # Batasan respons chitchat pendek (maksimal ~100 token)
-                },
+            # Membentuk history percakapan untuk client.chats.create / contents
+            chat_contents = []
+            for m in trimmed_history:
+                role_mapped = "user" if m["role"] == "user" else "model"
+                chat_contents.append(
+                    types.Content(
+                        role=role_mapped,
+                        parts=[types.Part.from_text(text=m["content"])]
+                    )
+                )
+            # Tambahkan pesan user saat ini
+            chat_contents.append(
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=question)]
+                )
             )
-            return clean_output(response.get("message", {}).get("content", ""))
-        except Exception as exc:
-            if DEBUG: print(f"[LLM] chitchat error: {exc}")
-            return "Halo kak! Ada yang bisa Minci bantu?"
 
+            response = gemini_client.models.generate_content(
+                model=CHAT_MODEL,
+                contents=chat_contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=CHITCHAT_SYSTEM_PROMPT,
+                    temperature=0.4,
+                    top_p=0.9,
+                    max_output_tokens=100,
+                ),
+            )
+            answer = clean_output(response.text or "")
+        except Exception as exc:
+            if DEBUG: print(f"[LLM] chitchat error (Gemini): {exc}")
+            answer = "Halo kak! Ada yang bisa Minci bantu?"
+
+        _remember(user_id, "user", question)
+        _remember(user_id, "assistant", answer)
+        return answer
 
     if _collection.count() == 0:
         if DEBUG: print("[RAG] collection kosong")
-        # Biarkan model merespons dengan context kosong
 
-    route_source, route_reason = detect_route(question)
+    retrieval_query = question
+    if _looks_like_followup(question) and trimmed_history:
+        previous_user_questions = [m["content"] for m in trimmed_history if m["role"] == "user"]
+        if previous_user_questions:
+            retrieval_query = f"{previous_user_questions[-1]} {question}"
+            if DEBUG:
+                print(f"[FOLLOWUP] Query retrieval digabung jadi: {retrieval_query!r}")
+
+    route_source, route_reason = detect_route(retrieval_query)
 
     if DEBUG:
         print("\n" + "=" * 70)
@@ -547,49 +611,66 @@ def ask_minci(question: str) -> str:
         print("=" * 70)
 
     try:
-        chunks = retrieve(question, route_source=route_source)
+        chunks = retrieve(retrieval_query, route_source=route_source)
     except Exception as exc:
-        if DEBUG: print(f"[RAG] retrieval error: {exc}")
+        print(f"[RAG] retrieval error: {exc}")
         chunks = []
 
-    # Blok 'if not chunks' manual dihapus, sehingga konteks kosong tetap dikirim ke model
+    if not chunks:
+        if DEBUG:
+            print("[RAG] Tidak ada chunk relevan -> fallback deterministik, LLM TIDAK dipanggil.")
+        _remember(user_id, "user", question)
+        _remember(user_id, "assistant", FALLBACK_TEXT)
+        return FALLBACK_TEXT
+
     context = build_context(chunks)
 
     if DEBUG:
         print("\n" + "=" * 70)
-        print("[CONTEXT YANG DIKIRIM KE MODEL]")
+        print("[CONTEXT YANG DIKIRIM KE GEMINI]")
         print("=" * 70)
         print(context)
         print("=" * 70)
 
     try:
-        # PENTING: Gunakan format ini agar Ollama menyuntikkan template chat Llama 3.2 secara benar
-        response = ollama.chat(
+        # Konversi riwayat lokal ke format `types.Content` untuk Gemini API
+        chat_contents = []
+        for m in trimmed_history:
+            role_mapped = "user" if m["role"] == "user" else "model"
+            chat_contents.append(
+                types.Content(
+                    role=role_mapped,
+                    parts=[types.Part.from_text(text=m["content"])]
+                )
+            )
+        
+        # Tambahkan prompt utama yang berisi context dan pertanyaan saat ini
+        final_prompt = build_user_prompt(question, context)
+        chat_contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=final_prompt)]
+            )
+        )
+
+        response = gemini_client.models.generate_content(
             model=CHAT_MODEL,
-            messages=[
-                {
-                    "role": "system", 
-                    "content": SYSTEM_PROMPT
-                },
-                {
-                    "role": "user", 
-                    "content": build_user_prompt(question, context)
-                },
-            ],
-            options={
-                "temperature": 0.1,    # Sudah benar (rendah agar konsisten)
-                "num_predict": 1024,
-                # Tambahkan parameter di bawah ini jika model masih suka tidak patuh:
-                # "top_p": 0.9,
-            },
+            contents=chat_contents,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT_WITH_CONTEXT,
+                temperature=0.1,
+                max_output_tokens=1024,
+            ),
         )
     except Exception as exc:
-        if DEBUG: print(f"[LLM] error: {exc}")
+        print(f"[LLM] error (Gemini): {exc}")
         return "Maaf kak, sistem Minci sedang gangguan. Coba lagi nanti ya!"
 
-
-    raw_answer = response.get("message", {}).get("content", "")
+    raw_answer = response.text or ""
     answer = clean_output(raw_answer)
+
+    _remember(user_id, "user", question)
+    _remember(user_id, "assistant", answer)
 
     return answer
 
@@ -599,7 +680,7 @@ def ask_minci(question: str) -> str:
 # ============================================================
 
 if __name__ == "__main__":
-    print("\nMinci - Asisten Virtual Akademik STT Cipasung")
+    print("\nMinci - Asisten Virtual Akademik STT Cipasung (Gemini API Powered)")
     print("Ketik 'exit' untuk keluar.\n")
 
     while True:

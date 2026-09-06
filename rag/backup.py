@@ -21,12 +21,22 @@ CHROMA_DB_DIR = os.path.join(BASE_DIR, "database", "chroma_db")
 COLLECTION_NAME = "minci_dokumen"
 
 EMBED_MODEL = "bge-m3"
-CHAT_MODEL = "llama3.2"  # Model Llama 3.2 terbaru yang cepat & gratis
+CHAT_MODEL = "qwen2.5:3b"
 
 RETRIEVAL_K = 20
 FINAL_CONTEXT_K = 8
 MAX_DISTANCE = 0.60
-ROUTED_MAX_DISTANCE = 0.58
+# Sebelumnya 0.58 -- LEBIH KETAT dari MAX_DISTANCE global, padahal query yang
+# sampai sini sudah lolos routing (artinya topik/dokumennya sudah "dijamin"
+# benar oleh where-filter di ChromaDB). Ambang di sini seharusnya LEBIH
+# LONGGAR, bukan lebih ketat -- distance gate di jalur routed cuma perlu jaga
+# dari chunk yang benar-benar tidak nyambung SAMA SEKALI di dalam dokumen yang
+# sama, bukan menyaring ketepatan topik (itu sudah tugas routing).
+# Akibat nilai lama (0.58): query pendek/generik seperti "syarat pendaftaran"
+# atau "pendaftaran" saja sering py py py punya distance ~0.6-0.7 ke chunk
+# detail (daftar dokumen syarat) -- lolos MAX_DISTANCE global tapi kandas di
+# sini, jadi context selalu kosong -> selalu fallback walau routing-nya benar.
+ROUTED_MAX_DISTANCE = 0.85
 DEBUG = True
 
 # Variabel FALLBACK manual dihapus karena sekarang diserahkan ke model
@@ -212,10 +222,7 @@ def detect_route(question: str) -> tuple[str | None, str]:
     words = set(q.split())
     requirement_words = {"syarat", "persyaratan", "dokumen", "berkas"}
     krs_words = {"krs", "perwalian"}
-    registration_words = {
-        "pendaftaran", "mendaftar", "daftar", "pmb", "masuk",
-        "calon", "mahasiswa",
-    }
+    registration_words = {"pendaftaran", "mendaftar", "daftar", "pmb", "calon", "mahasiswa", "masuk"}
 
     if words & requirement_words and words & krs_words:
         return "KRS.docx", "prioritas syarat KRS/perwalian"
@@ -321,6 +328,10 @@ def intent_match(question: str, document: str) -> int:
         meaningful_tokens(question_text)
         & {"cara", "langkah", "prosedur", "mengisi", "pengisian"}
     )
+    registration_query = bool(
+        meaningful_tokens(question_text)
+        & {"pendaftaran", "mendaftar", "daftar", "masuk"}
+    )
 
     score = 0
     if requirement_query and any(
@@ -333,6 +344,10 @@ def intent_match(question: str, document: str) -> int:
         for term in _PROCEDURE_TERMS
     ):
         score += 3
+    if registration_query and "pendaftaran" in document_text:
+        score += 2
+    if registration_query and "persyaratan administrasi pendaftaran" in document_text:
+        score += 6
     return score
 
 
@@ -364,6 +379,11 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
     q_tokens = meaningful_tokens(question)
     candidates = []
 
+    if DEBUG:
+        print(f"\n[RETRIEVE] where={route_source or '(global, semua dokumen)'} | threshold={threshold}")
+        if not documents:
+            print("[RETRIEVE] ChromaDB tidak mengembalikan dokumen apapun (where-filter mungkin 0 hasil, atau collection kosong).")
+
     for doc_id, document, metadata, distance in zip(
         ids, documents, metadatas, distances
     ):
@@ -373,14 +393,23 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
         distance = float(distance)
         overlap = lexical_overlap(question, document)
         intent = intent_match(question, document)
+        source = (metadata or {}).get("source", "?")
 
-        if distance > threshold:
+        lolos_distance = distance <= threshold
+        if DEBUG:
+            status = "✅ lolos" if lolos_distance else "❌ DIBUANG (distance > threshold)"
+            print(f"    distance={distance:.4f}  overlap={overlap}  intent={intent}  source={source}  -> {status}")
+            print(f"       {document[:120].replace(chr(10), ' ')}...")
+
+        if not lolos_distance:
             continue
 
         # Route sudah membatasi dokumen ke sumber yang relevan. Jangan buang
         # chunk teratas hanya karena bentuk katanya berbeda, misalnya
         # "syarat" vs "persyaratan" atau "daftar" vs "pendaftaran".
         if route_source is None and len(q_tokens) >= 2 and overlap < 1:
+            if DEBUG:
+                print(f"       -> DIBUANG (overlap gate, tidak ada kata kunci konten sama; global search)")
             continue
 
         candidates.append({
@@ -422,24 +451,44 @@ def build_context(chunks: list[dict]) -> str:
 # LLM PROMPT
 # ============================================================
 
-SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
+# Fallback DETERMINISTIK -- dipakai langsung oleh KODE (bukan diminta ke model)
+# begitu chunks kosong. Model tidak pernah diberi "pilihan" untuk menjawab ini,
+# jadi tidak ada lagi ruang bagi model buat salah menyimpulkan context kosong
+# padahal isinya ada.
 
-PENTING: Cek isi teks CONTEXT terlebih dahulu sebelum melihat PERTANYAAN!
+FALLBACK_TEXT = "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!"
 
-KONDISI 1 - JIKA CONTEXT BERISI TULISAN "TIDAK ADA DATA PANDUAN YANG DITEMUKAN.":
-- Kamu WAJIB dan HANYA BOLEH menjawab dengan kalimat persis seperti ini: "Maaf kak, informasi yang kamu tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha ya!"
-- DILARANG KERAS mengarang, menebak, atau menggunakan pengetahuan umummu untuk menjawab pertanyaan akademik seputar kampus jika context kosong!
+# System prompt ini HANYA dipakai ketika chunks SUDAH DIPASTIKAN ADA ISINYA oleh
+# kode (lihat ask_minci). Makanya KONDISI 1 (context kosong) sengaja DIHAPUS
+# dari sini -- model tidak perlu lagi menebak/mengecek apakah context kosong,
+# karena kalau prompt ini yang dipakai, context SELALU ada isinya. Ini
+# menghilangkan sumber kesalahan sebelumnya: model 3B yang kadang salah
+# menyimpulkan context kosong padahal datanya ada persis di depannya.
+#
+# CATATAN PERUBAHAN PERILAKU: KONDISI 3 (jawab pertanyaan umum di luar kampus
+# pakai pengetahuan umum model, mis. matematika/sejarah) ikut dihapus di sini.
+# Sekarang pertanyaan di luar cakupan dokumen kampus akan selalu jatuh ke
+# FALLBACK_TEXT (chunks kosong -> tidak pernah sampai ke LLM sama sekali),
+# BUKAN dijawab pakai pengetahuan umum model seperti sebelumnya. Ini konsisten
+# dengan semua perbaikan gate/routing yang sudah kita buat sebelumnya (supaya
+# Minci tidak "mengarang" jawaban di luar dokumen resmi kampus). Kalau kamu
+# justru MASIH mau Minci bisa jawab pertanyaan umum di luar kampus, kasih tau
+# saya -- itu perlu jalur terpisah lagi (bukan sekadar taruh balik ke sini),
+# karena kalau taruh di sini lagi, prompt ini jadi butuh model MENEBAK lagi
+# kapan harus pakai pengetahuan umum vs kapan harus attach ke context -- balik
+# ke masalah yang sama.
+SYSTEM_PROMPT_WITH_CONTEXT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
 
-KONDISI 2 - JIKA CONTEXT BERISI DATA PANDUAN AKTIF:
+CONTEXT di bawah ini SUDAH DIPASTIKAN BERISI DATA PANDUAN YANG RELEVAN dengan pertanyaan. Kamu WAJIB menjawab dari situ -- JANGAN PERNAH bilang "tidak ditemukan" atau "tidak ada di panduan" untuk pertanyaan ini, karena datanya PASTI ada di CONTEXT.
+
+ATURAN JAWABAN:
 - Jawab pertanyaan pengguna HANYA berdasarkan informasi faktual yang tertulis di dalam CONTEXT tersebut.
 - Jika pertanyaan meminta "syarat", berikan DAFTAR SYARAT saja dari context. Jangan jelaskan tata cara.
 - Jika pertanyaan meminta "cara", berikan LANGKAH-LANGKAH saja dari context. Jangan berikan daftar syarat.
-- JIKA pertanyaan meminta "syarat" atau "persyaratan", kamu WAJIB DAN HARUS MENULISKAN SEMUA DAFTAR SYARAT YANG ADA DI CONTEXT SECARA LENGKAP! 
+- JIKA pertanyaan meminta "syarat", "persyaratan" atau "pendaftaran", kamu WAJIB DAN HARUS MENULISKAN SEMUA DAFTAR SYARAT YANG ADA DI CONTEXT SECARA LENGKAP!
 - Jika pertanyaan tidak spesifik mengenai jadwal PMB, cantumkan tanggal pendaftaran gelombang 1, 2, dan 3 yang tertera di context.
-_ Jika pertanyaan meminta "seleksi" berikan jadwal seleksi penerimaan mahasiswa baru yang ada di context.
-
-KONDISI 3 - JIKA PERTANYAAN ADALAH PERTANYAAN UMUM DI LUAR URUSAN KAMPUS (Contoh: matematika, sejarah, coding, AI):
-- ABAIKAN CONTEXT dan jawablah dengan pengetahuan umummu secara cerdas dan santai.
+- Jika pertanyaan meminta "seleksi" berikan jadwal SELEKSI PENERIMAAN MAHASISWA BARU yang ada di context.
+- Jika pertanyaan meminta "biaya", "bayar", atau "nominal", berikan SEMUA INFORMASI BESERTA KETERANGANNYA.
 
 ATURAN WAJIB UNTUK SEMUA JAWABAN:
 - HARUS menggunakan kata "kak" atau "kakak" di SETIAP kalimat! DILARANG menggunakan kata "Kamu".
@@ -552,7 +601,20 @@ def ask_minci(question: str) -> str:
         if DEBUG: print(f"[RAG] retrieval error: {exc}")
         chunks = []
 
-    # Blok 'if not chunks' manual dihapus, sehingga konteks kosong tetap dikirim ke model
+    # --- Keputusan "ada data atau tidak" diambil di KODE, bukan diserahkan
+    # ke model. Sebelumnya context kosong tetap dikirim ke LLM dengan harapan
+    # dia "membaca" instruksi KONDISI 1 dan menyimpulkan sendiri -- tapi itu
+    # juga berarti ketika context ADA ISINYA, model tetap harus "membuktikan
+    # sendiri" bahwa ini bukan kasus KONDISI 1, dan model 3B kadang salah
+    # simpul (lihat kasus "syarat pendaftaran" yang tetap fallback padahal
+    # context-nya lengkap). Dengan cek eksplisit di sini, model HANYA PERNAH
+    # melihat prompt yang isinya SUDAH DIPASTIKAN ada datanya, dan bahkan tidak
+    # pernah dipanggil sama sekali kalau memang tidak ada apa-apa untuk dijawab.
+    if not chunks:
+        if DEBUG:
+            print("[RAG] Tidak ada chunk relevan -> fallback deterministik, LLM TIDAK dipanggil.")
+        return FALLBACK_TEXT
+
     context = build_context(chunks)
 
     if DEBUG:
@@ -569,7 +631,7 @@ def ask_minci(question: str) -> str:
             messages=[
                 {
                     "role": "system", 
-                    "content": SYSTEM_PROMPT
+                    "content": SYSTEM_PROMPT_WITH_CONTEXT
                 },
                 {
                     "role": "user", 
@@ -587,8 +649,10 @@ def ask_minci(question: str) -> str:
         if DEBUG: print(f"[LLM] error: {exc}")
         return "Maaf kak, sistem Minci sedang gangguan. Coba lagi nanti ya!"
 
-
     raw_answer = response.get("message", {}).get("content", "")
+    if DEBUG:
+        print("\n[RAW LLM OUTPUT sebelum clean_output]")
+        print(raw_answer)
     answer = clean_output(raw_answer)
 
     return answer
