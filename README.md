@@ -1,272 +1,412 @@
-# 📘 Panduan Lengkap: Minci — Virtual Asisten Akademik STT Cipasung
+# 🤖 Minci — Virtual Asisten Akademik STT Cipasung
 
-Panduan ini mengasumsikan kamu mulai dari nol. Ikuti urut dari atas ke bawah.
+Minci adalah virtual assistant akademik untuk membantu mahasiswa dan calon mahasiswa STT Cipasung mendapatkan informasi seputar:
 
-**Arsitektur singkat:**
+- 🎓 Penerimaan Mahasiswa Baru (PMB)
+- 📅 Kalender akademik dan jadwal kegiatan
+- 📝 Kartu Rencana Studi (KRS) dan perwalian
+- 💰 Biaya kuliah dan beasiswa
+- 🏫 Profil, program studi, UKM, serta kontak kampus
 
-```
-WhatsApp User
-     │
-     ▼
+Minci menggunakan pendekatan **Retrieval-Augmented Generation (RAG)**. Informasi faktual diambil dari dokumen resmi kampus melalui ChromaDB, kemudian dirangkum oleh model bahasa lokal melalui Ollama.
+
+> **Status proyek:** prototipe akademik lokal dengan integrasi WhatsApp Cloud API.
+
+---
+
+## ✨ Fitur Utama
+
+| Fitur | Keterangan |
+|---|---|
+| 🔎 Semantic retrieval | Mencari potongan dokumen relevan menggunakan embedding `bge-m3`. |
+| 🗂️ Document-aware routing | Mengarahkan pertanyaan ke dokumen PMB, KRS, kalender, atau biaya. |
+| 🧠 Local LLM | Membuat jawaban menggunakan model Ollama secara lokal. |
+| 💬 Chitchat | Menangani sapaan, salam, dan percakapan ringan. |
+| 📱 WhatsApp webhook | Menerima dan membalas pesan melalui Meta WhatsApp Cloud API. |
+| 🛡️ Duplicate protection | Mencegah balasan ganda ketika Meta mengirim ulang webhook. |
+| 🧪 Debug-friendly | Menampilkan route, alasan routing, dan context retrieval. |
+
+---
+
+## 🧩 Arsitektur
+
+```text
+Pengguna WhatsApp
+        │
+        ▼
 Meta WhatsApp Cloud API
-     │  (webhook HTTPS)
-     ▼
-Cloudflare Tunnel  ──►  Laptop kamu (localhost:8000)
-                             │
-                             ▼
-                     FastAPI webhook (app.py)
-                             │
-                             ▼
-                     query.py (RAG)
-                       │            │
-                       ▼            ▼
-                  ChromaDB      Ollama (model "minci"
-                (dokumen PMB/    hasil fine-tuning LoRA)
-                    KRS)
+        │ HTTPS webhook
+        ▼
+Public tunnel
+        │
+        ▼
+FastAPI: webhook/app.py
+        │
+        ▼
+rag/query.py
+   ┌────┴─────┐
+   ▼          ▼
+ChromaDB   Ollama
+   │          │
+   ▼          ▼
+Dokumen    Embedding + LLM
+kampus
 ```
 
-- **Fakta** (jadwal, syarat, biaya, dsb) datang dari dokumen Word lewat RAG.
-- **Gaya bahasa** (santai-tapi-sopan ala gen-z) datang dari model yang sudah di-fine-tune LoRA.
-- Keduanya digabung di `query.py`: konteks dari dokumen disuntikkan ke prompt, lalu dijawab pakai model bergaya Minci.
+### Alur Pertanyaan
+
+1. Pesan diterima dari terminal atau WhatsApp.
+2. Query dinormalisasi, termasuk singkatan PMB, KRS, dan PRODI.
+3. Sistem menentukan sumber dokumen yang relevan.
+4. Ollama membuat embedding query.
+5. ChromaDB mengambil chunk dokumen.
+6. Context dan pertanyaan dikirim ke model chat.
+7. Jawaban dibersihkan sebelum ditampilkan atau dikirim ke WhatsApp.
 
 ---
 
-## Bagian 1 — Fine-tuning LoRA di Google Colab
+## 🛠️ Teknologi dan Library
 
-### 1.1 Siapkan/perluas dataset
+### Backend dan API
 
-File `dataset/dataset_training.json` sudah berisi 20 contoh gaya bahasa Minci. Ini **cukup untuk mulai**, tapi makin banyak contoh (idealnya 50–150+) makin konsisten gayanya. Kamu tinggal tambah entri baru dengan format yang sama:
+- `Python 3.10+`
+- `FastAPI` — server webhook HTTP.
+- `Uvicorn` — ASGI server.
+- `Requests` — client WhatsApp Cloud API.
+- `python-dotenv` — konfigurasi environment.
 
-```json
-{
-  "instruction": "pertanyaan atau statement dari user",
-  "input": "",
-  "output": "jawaban Minci dengan gaya santai-sopan"
-}
-```
+### RAG dan Dokumen
 
-Tidak perlu isi fakta PMB/KRS yang detail di sini — itu tugasnya RAG. Dataset ini cukup fokus ke **gaya bicara**: sapaan, cara merespons keluhan, cara minta klarifikasi, cara menutup obrolan, dll.
+- `ChromaDB` — vector database lokal.
+- `Ollama` — embedding dan model bahasa lokal.
+- `bge-m3` — model embedding multilingual.
+- `python-docx` — membaca paragraf dan tabel Word.
 
-### 1.2 Jalankan training di Colab
+### Integrasi
 
-1. Buka [Google Colab](https://colab.research.google.com/), lalu upload file `colab/train_lora_colab.ipynb`.
-2. Runtime → Change runtime type → pilih **T4 GPU** → Save.
-3. Runtime → Run all.
-4. Saat diminta upload dataset, upload `dataset/dataset_training.json` (atau versi kamu yang sudah diperluas).
-5. Tunggu proses training selesai (biasanya beberapa menit untuk dataset kecil).
-6. Di cell terakhir, file `.gguf` akan otomatis ter-download ke laptop kamu (cek folder Downloads).
+- Meta WhatsApp Cloud API.
+- Cloudflare Tunnel atau tunnel HTTPS lain untuk development.
+
+Versi dependency tersedia di [webhook/requirements.txt](webhook/requirements.txt).
 
 ---
 
-## Bagian 2 — Install & setup Ollama di laptop
+## 📁 Struktur Repository
 
-### 2.1 Install Ollama
-
-Download dan install dari https://ollama.com/download (tersedia untuk Windows/Linux/Mac).
-
-Verifikasi instalasi:
-
-```bash
-ollama --version
+```text
+Virtual-Asisten-STTC/
+├── dataset/
+│   ├── chitchat.json              # Frasa percakapan ringan
+│   ├── dataset.json               # Dataset contoh jawaban
+│   ├── dataset_minci.json         # Dataset tambahan Minci
+│   └── dataset_training.json      # Dataset training jika tersedia
+├── documents/
+│   ├── BIAYA.docx                 # Data biaya kuliah
+│   ├── KALENDER.docx              # Jadwal akademik dan PMB
+│   ├── KRS.docx                   # Panduan KRS dan perwalian
+│   └── PMB.docx                   # Syarat dan informasi PMB
+├── llm/
+│   ├── Modelfile                  # Konfigurasi model Ollama
+│   └── llama-3.2-3b-instruct.Q4_K_M.gguf
+├── rag/
+│   ├── ingest.py                  # Membaca DOCX dan membangun indeks
+│   ├── query.py                   # Routing, retrieval, dan jawaban
+│   ├── test.py                    # Sandbox pengujian RAG
+│   └── database/
+│       └── chroma_db/             # Database vector lokal
+├── training/
+│   └── model_training.ipynb       # Notebook training/fine-tuning
+├── webhook/
+│   ├── app.py                     # FastAPI WhatsApp webhook
+│   ├── env.example                # Template environment variable
+│   └── requirements.txt            # Dependency Python
+├── README.md
+└── SETUP_GUIDE.md
 ```
 
-### 2.2 Pull model embedding untuk RAG
+> Folder `rag/database/chroma_db/` merupakan hasil generate. Jangan mengedit database secara manual.
 
-```bash
+---
+
+## ✅ Prasyarat
+
+Pastikan sudah tersedia:
+
+- Python 3.10 atau lebih baru.
+- Ollama.
+- Model embedding `bge-m3`.
+- Model chat yang sesuai dengan `CHAT_MODEL` di `rag/query.py`.
+- Dokumen `.docx` di folder `documents/`.
+- Akun Meta Developer jika ingin memakai WhatsApp.
+
+Instal Ollama dari [ollama.com/download](https://ollama.com/download).
+
+---
+
+## 🚀 Instalasi Lokal
+
+### 1. Clone repository
+
+```powershell
+git clone <URL-REPOSITORY>
+cd Virtual-Asisten-STTC
+```
+
+### 2. Buat virtual environment
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Jika PowerShell memblokir aktivasi script:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r webhook\requirements.txt
+```
+
+### 3. Install dependency
+
+```powershell
+python -m pip install --upgrade pip
+pip install -r webhook\requirements.txt
+```
+
+### 4. Siapkan Ollama
+
+```powershell
 ollama pull bge-m3
+ollama list
 ```
 
-Model ini ringan (~1.2 GB), dipakai untuk mengubah teks jadi vektor saat pencarian dokumen.
+Konfigurasi model berada di `rag/query.py`:
 
-### 2.3 Buat model "minci" dari hasil fine-tuning
+```python
+CHAT_MODEL = "llama3.2"
+EMBED_MODEL = "bge-m3"
+```
 
-1. Pindahkan file `.gguf` hasil download dari Colab ke folder `ollama/` di project ini.
-2. Rename file tersebut jadi `llama-3.2-3b-instruct.Q4_K_M.gguf` (atau edit baris `FROM` di `ollama/Modelfile` supaya sesuai nama file kamu).
-3. Masuk ke folder `ollama/` lalu jalankan:
+Jika menggunakan GGUF lokal dari folder `llm/`:
 
-```bash
-cd minci-project/ollama
+```powershell
+cd llm
 ollama create minci -f Modelfile
-```
-
-4. Test modelnya langsung di terminal:
-
-```bash
 ollama run minci
->>> Min, gimana cara daftar PMB?
+cd ..
 ```
 
-Kalau jawabannya sudah kerasa santai-tapi-sopan, fine-tuning berhasil ✅
+Jika model dibuat dengan nama `minci`, ubah `CHAT_MODEL` di `rag/query.py` menjadi `minci`.
 
 ---
 
-## Bagian 3 — Setup RAG (dokumen PMB & KRS)
+## 🗃️ Menyiapkan dan Mengindeks Dokumen
 
-### 3.1 Siapkan Python environment
+Letakkan dokumen resmi `.docx` di folder `documents/`:
 
-```bash
-cd minci-project/webhook
-python -m venv venv
-.\venv\Scripts\activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+- `PMB.docx`
+- `KRS.docx`
+- `KALENDER.docx`
+- `BIAYA.docx`
 
-### 3.2 Taruh dokumen Word
+Jalankan ingestion dari folder `rag`:
 
-Masukkan semua file `.docx` PMB dan KRS ke folder `minci-project/documents/`.
-
-> 💡 Tips: kalau dokumen kamu masih format PDF/gambar, convert dulu ke `.docx`, atau kalau isinya tabel-tabel kompleks, cek dulu apakah tabelnya terbaca rapi (script `ingest.py` sudah menghandle isi tabel, bukan cuma paragraf).
-
-### 3.3 Jalankan ingestion
-
-```bash
-cd minci-project/rag
+```powershell
+cd rag
 python ingest.py
 ```
 
-Ini akan membaca semua `.docx`, memecahnya jadi potongan teks, dan menyimpannya sebagai vector database lokal di folder `rag/chroma_db/`.
+Script akan:
 
-**Jalankan ulang script ini setiap kali dokumen PMB/KRS berubah atau bertambah.**
+1. Membaca paragraf dan tabel Word.
+2. Mengenali heading dan konteks section.
+3. Menormalkan angka Romawi seperti `Gelombang II`.
+4. Memecah dokumen menjadi chunk.
+5. Membuat embedding dengan `bge-m3`.
+6. Menyimpan hasil ke `rag/database/chroma_db/`.
 
-### 3.4 Test RAG saja (tanpa WhatsApp dulu)
+Jalankan ulang ingestion setiap kali dokumen berubah, kemudian mulai proses Python baru sebelum menguji query.
 
-```bash
+---
+
+## 🧪 Menjalankan dan Menguji RAG
+
+### Mode interaktif
+
+```powershell
+cd rag
 python query.py
 ```
 
-Coba tanya-tanya lewat terminal untuk memastikan jawabannya akurat berdasarkan dokumen sebelum lanjut ke integrasi WhatsApp.
+Contoh pertanyaan:
+
+```text
+Kapan pendaftaran PMB gelombang 1 dibuka?
+Syarat daftar PMB apa saja?
+Cara mengisi KRS online bagaimana?
+UKT per semester berapa?
+Jadwal KTMB 2026 kapan?
+```
+
+Ketik `exit` untuk keluar.
+
+### Pengujian satu pertanyaan
+
+```powershell
+cd rag
+python -c "import query; print(query.ask_minci('Syarat daftar PMB apa saja?'))"
+```
+
+`rag/test.py` dapat digunakan sebagai sandbox untuk menguji perubahan routing dan retrieval secara terpisah dari pipeline produksi.
+
+### Debug retrieval
+
+Aktifkan:
+
+```python
+DEBUG = True
+```
+
+Log akan menampilkan query yang dinormalisasi, route, alasan routing, dan context yang dikirim ke model.
 
 ---
 
-## Bagian 4 — Setup WhatsApp Business API (Meta)
+## 📱 Integrasi WhatsApp
 
-### 4.1 Buat App di Meta for Developers
+### 1. Buat aplikasi Meta
 
-1. Buka https://developers.facebook.com/ → **My Apps** → **Create App**.
-2. Pilih tipe **Business**.
-3. Di dashboard App, tambahkan produk **WhatsApp**.
+1. Buka [Meta for Developers](https://developers.facebook.com/).
+2. Buat aplikasi bertipe Business.
+3. Tambahkan produk WhatsApp.
+4. Catat access token, phone number ID, dan nomor testing.
 
-### 4.2 Ambil kredensial testing
+### 2. Buat file environment
 
-Di menu **WhatsApp → API Setup**, kamu akan melihat:
-
-- **Temporary access token** (berlaku 24 jam, cukup untuk testing awal)
-- **Phone number ID**
-- Nomor test WhatsApp yang disediakan Meta
-
-Untuk produksi nanti (bukan cuma testing), kamu perlu bikin **System User** dengan **Permanent Token** di Business Settings — tapi untuk mulai, temporary token dulu tidak apa-apa.
-
-### 4.3 Isi file `.env`
-
-```bash
-cd minci-project/webhook
-copy .env.example .env
+```powershell
+cd webhook
+Copy-Item env.example .env
 ```
 
-Edit `.env`, isi:
+Isi `.env`:
 
-- `WA_VERIFY_TOKEN` → bebas kamu tentukan sendiri (contoh: `minci-verify-123`), nanti dipakai lagi di step 4.5
-- `WA_ACCESS_TOKEN` → dari dashboard Meta
-- `WA_PHONE_NUMBER_ID` → dari dashboard Meta
+```env
+WA_VERIFY_TOKEN=ganti-dengan-token-verifikasi
+WA_ACCESS_TOKEN=token-meta-whatsapp
+WA_PHONE_NUMBER_ID=phone-number-id
+WA_API_VERSION=v26.0
+```
 
-### 4.4 Jalankan webhook server
+Jangan commit `.env` karena berisi credential.
 
-```bash
-cd minci-project/webhook
+### 3. Jalankan FastAPI
+
+```powershell
+cd webhook
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-Cek di browser: `http://localhost:8000` harus muncul `{"status": "Minci webhook aktif ✅"}`.
+Health check:
 
----
-
-## Bagian 5 — Expose webhook ke internet dengan Cloudflare Tunnel
-
-Meta mewajibkan webhook URL berupa **HTTPS publik**, makanya kita pakai Cloudflare Tunnel supaya laptop lokal bisa diakses dari internet tanpa perlu domain/hosting.
-
-### 5.1 Install cloudflared
-
-- **Windows**: download installer dari https://github.com/cloudflare/cloudflared/releases
-- **Mac**: `brew install cloudflare/cloudflare/cloudflared`
-- **Linux (Debian/Ubuntu)**:
-
-```bash
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
-sudo dpkg -i cloudflared.deb
+```text
+http://localhost:8000/
 ```
 
-### 5.2 Jalankan tunnel cepat (quick tunnel, untuk testing)
+Respons yang diharapkan:
 
-Pastikan `app.py` (Bagian 4.4) sudah jalan di terminal terpisah, lalu di terminal baru:
+```json
+{"status":"Minci webhook aktif ✅"}
+```
 
-```bash
+### 4. Expose endpoint dengan HTTPS
+
+Untuk development, gunakan Cloudflare Tunnel:
+
+```powershell
 cloudflared tunnel --url http://localhost:8000
 ```
 
-Kamu akan dapat URL publik seperti:
+Gunakan URL publik yang dihasilkan sebagai callback URL Meta:
 
+```text
+https://<URL-TUNNEL>/webhook
 ```
-https://random-words-abcd.trycloudflare.com
-```
 
-URL ini yang akan kamu pakai sebagai webhook URL. **Catatan:** quick tunnel ini URL-nya berubah tiap kali di-restart — cocok untuk testing, tapi untuk produksi lihat catatan di Bagian 6.
+Verification token di Meta harus sama dengan `WA_VERIFY_TOKEN` pada `.env`. Setelah tersimpan, subscribe ke field `messages`.
 
-### 5.3 Daftarkan webhook URL ke Meta
-
-1. Di dashboard Meta → **WhatsApp → Configuration**.
-2. Klik **Edit** pada Webhook.
-3. **Callback URL**: `https://random-words-abcd.trycloudflare.com/webhook`
-4. **Verify Token**: isi sama persis dengan `WA_VERIFY_TOKEN` di file `.env` kamu.
-5. Klik **Verify and Save** — kalau berhasil, artinya endpoint `GET /webhook` di `app.py` sudah benar merespons challenge dari Meta.
-6. Subscribe ke field **messages** (centang webhook fields → messages).
+> Quick tunnel cocok untuk testing. URL dapat berubah ketika tunnel dimulai ulang.
 
 ---
 
-## Bagian 6 — Testing end-to-end
+## 🔐 Catatan Keamanan
 
-1. Kirim pesan WhatsApp ke nomor test dari Meta (nomor ini ada di dashboard **API Setup**, kamu harus daftarkan nomor HP kamu dulu sebagai tester di **API Setup → To**).
-2. Tulis pertanyaan seputar PMB/KRS, misalnya: *"Min, biaya pendaftaran PMB berapa ya?"*
-3. Cek terminal `uvicorn` — harus muncul log pesan masuk.
-4. Dalam beberapa detik, balasan dari Minci harus masuk ke WhatsApp kamu.
-
-Kalau tidak ada balasan, cek urutan ini:
-
-- [ ] `ollama serve` aktif (biasanya otomatis jalan setelah install)?
-- [ ] `ollama list` menampilkan model `minci`?
-- [ ] `uvicorn app:app` masih jalan tanpa error?
-- [ ] `cloudflared` masih jalan dan URL belum berubah?
-- [ ] Log di terminal `uvicorn` menunjukkan payload masuk dari Meta?
-- [ ] `.env` sudah diisi dengan token & phone_number_id yang benar?
+- Jangan commit `.env`, access token, atau credential WhatsApp.
+- Gunakan permanent access token untuk production.
+- Batasi logging payload WhatsApp jika berisi data pribadi.
+- Tambahkan rate limiting sebelum deployment publik.
+- Gunakan HTTPS stabil untuk production.
 
 ---
 
-## Bagian 7 — Untuk produksi (opsional, kalau nanti mau lanjut lebih serius)
+## 🧯 Troubleshooting
 
-Beberapa hal yang worth dipikirkan setelah versi testing jalan lancar:
+### `ModuleNotFoundError`
 
-1. **Named Tunnel (bukan quick tunnel)** — supaya URL webhook permanen dan tidak berubah tiap restart. Butuh akun Cloudflare + domain (bisa domain gratis/murah), setup dengan `cloudflared tunnel create` dan `cloudflared tunnel route dns`.
-2. **Permanent Access Token** — bikin System User di Meta Business Settings supaya token tidak expired tiap 24 jam.
-3. **Auto-start service** — jadikan `ollama serve`, `uvicorn`, dan `cloudflared` berjalan sebagai service (systemd di Linux / Task Scheduler di Windows) supaya otomatis nyala kalau laptop restart.
-4. **Rate limiting & logging** — supaya kalau ada spam pesan, laptop tidak kewalahan (mengingat resource terbatas).
-5. **Evaluasi kualitas RAG** — coba beberapa pertanyaan edge-case (pertanyaan di luar dokumen, pertanyaan ambigu) untuk pastikan Minci tidak halusinasi.
+Pastikan environment aktif dan dependency terpasang:
 
----
-
-## Ringkasan urutan menjalankan (setelah semua setup selesai)
-
-Setiap mau menyalakan Minci, jalankan 3 terminal terpisah:
-
-```bash
-# Terminal 1 — pastikan Ollama jalan (biasanya sudah auto-start)
-ollama serve
-
-# Terminal 2 — webhook server
-cd minci-project/webhook
-.\venv\Scripts\activate
-uvicorn app:app --host 0.0.0.0 --port 8000
-
-# Terminal 3 — tunnel publik
-cloudflared tunnel --url http://localhost:8000
+```powershell
+pip install -r webhook\requirements.txt
 ```
 
-Kalau pakai quick tunnel, ingat URL-nya berubah tiap restart — jadi Callback URL di dashboard Meta perlu di-update ulang tiap kali. Ini alasan utama kenapa untuk pemakaian jangka panjang disarankan pakai **Named Tunnel** (Bagian 7.1).
+### Chroma menampilkan `0 chunks`
+
+Jalankan ingestion dari folder `rag`:
+
+```powershell
+cd rag
+python ingest.py
+```
+
+Pastikan output ingestion menunjukkan chunk tersimpan di `rag/database/chroma_db/`. Mulai proses Python baru setelah ingestion selesai.
+
+### Jawaban fallback padahal data ada
+
+Aktifkan `DEBUG = True`, lalu periksa:
+
+1. Apakah route menuju dokumen yang benar?
+2. Apakah chunk relevan masuk ke context?
+3. Apakah distance melewati threshold?
+4. Apakah model chat yang dipanggil sesuai dengan model Ollama?
+
+### WhatsApp tidak membalas
+
+Periksa server Uvicorn, URL tunnel, verification token, access token, phone number ID, log webhook, Ollama, dan model chat.
+
+### Pesan WhatsApp dibalas dua kali
+
+`app.py` memiliki deduplikasi berdasarkan message ID. Pastikan webhook mengembalikan HTTP `200 OK` dengan cepat dan proses RAG berjalan di background task.
+
+---
+
+## 📚 Dokumentasi Internal
+
+- [Setup guide](SETUP_GUIDE.md)
+- [RAG ingestion](rag/ingest.py)
+- [RAG query pipeline](rag/query.py)
+- [WhatsApp webhook](webhook/app.py)
+- [Ollama Modelfile](llm/Modelfile)
+- [Dataset chitchat](dataset/chitchat.json)
+
+---
+
+## 🛣️ Pengembangan Berikutnya
+
+- Menambahkan evaluasi otomatis untuk seluruh pertanyaan uji RAG.
+- Menyatukan logic eksperimen di `rag/test.py` dengan pipeline produksi secara terkontrol.
+- Menambahkan reranker untuk retrieval yang lebih presisi.
+- Menambahkan test untuk routing, normalisasi query, dan webhook verification.
+- Menggunakan named tunnel dan permanent token untuk deployment production.
+
+---
+
+## 📄 Lisensi
+
+Belum ditentukan. Tambahkan file lisensi sebelum proyek didistribusikan secara publik.
