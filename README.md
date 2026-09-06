@@ -16,15 +16,15 @@ Minci menggunakan pendekatan **Retrieval-Augmented Generation (RAG)**. Informasi
 
 ## ✨ Fitur Utama
 
-| Fitur | Keterangan |
-|---|---|
-| 🔎 Semantic retrieval | Mencari potongan dokumen relevan menggunakan embedding `bge-m3`. |
+| Fitur                     | Keterangan                                                        |
+| ------------------------- | ----------------------------------------------------------------- |
+| 🔎 Semantic retrieval     | Mencari potongan dokumen relevan menggunakan embedding `bge-m3`.  |
 | 🗂️ Document-aware routing | Mengarahkan pertanyaan ke dokumen PMB, KRS, kalender, atau biaya. |
-| 🧠 Local LLM | Membuat jawaban menggunakan model Ollama secara lokal. |
-| 💬 Chitchat | Menangani sapaan, salam, dan percakapan ringan. |
-| 📱 WhatsApp webhook | Menerima dan membalas pesan melalui Meta WhatsApp Cloud API. |
-| 🛡️ Duplicate protection | Mencegah balasan ganda ketika Meta mengirim ulang webhook. |
-| 🧪 Debug-friendly | Menampilkan route, alasan routing, dan context retrieval. |
+| 🧠 Local LLM              | Membuat jawaban menggunakan model Ollama secara lokal.            |
+| 💬 Chitchat               | Menangani sapaan, salam, dan percakapan ringan.                   |
+| 📱 WhatsApp webhook       | Menerima dan membalas pesan melalui Meta WhatsApp Cloud API.      |
+| 🛡️ Duplicate protection   | Mencegah balasan ganda ketika Meta mengirim ulang webhook.        |
+| 🧪 Debug-friendly         | Menampilkan route, alasan routing, dan context retrieval.         |
 
 ---
 
@@ -313,7 +313,7 @@ http://localhost:8000/
 Respons yang diharapkan:
 
 ```json
-{"status":"Minci webhook aktif ✅"}
+{ "status": "Minci webhook aktif ✅" }
 ```
 
 ### 4. Expose endpoint dengan HTTPS
