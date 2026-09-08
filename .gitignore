@@ -28,6 +28,7 @@ vendor/
 venv/
 .venv/
 .claude/
+.obsidian/
 
 # Build outputs
 dist/
@@ -45,6 +46,7 @@ temp/
 
 # Database
 database/
+chroma_db/
 
 # large files
 *.gguf

@@ -1,14 +1,9 @@
 """
 Pure RAG query.py untuk Minci.
 - Semua pertanyaan akademik melewati retrieval.
-- Routing memilih source ChromaDB. Tie-break routing dibangun OTOMATIS dari
-  daftar keyword di ROUTES (lihat _ROUTE_SINGLE_WORDS) -- jadi menambah
-  keyword baru ke ROUTES otomatis konsisten di semua jalur routing, tidak
-  perlu diketik ulang manual di tempat lain.
-- Keputusan "context ada isinya atau tidak" diambil di KODE, bukan diserahkan
-  ke model. Kalau retrieval tidak menemukan chunk relevan, ask_minci()
-  langsung mengembalikan FALLBACK_TEXT tanpa memanggil LLM sama sekali. Model
-  HANYA dipanggil ketika context sudah dipastikan ada isinya.
+- Routing memilih source ChromaDB.
+- Model SELALU dipanggil, bahkan ketika context kosong.
+- Fallback sepenuhnya di-handle oleh System Prompt Llama 3.2.
 """
 
 from __future__ import annotations
@@ -26,7 +21,7 @@ CHROMA_DB_DIR = os.path.join(BASE_DIR, "database", "chroma_db")
 COLLECTION_NAME = "minci_dokumen"
 
 EMBED_MODEL = "bge-m3"
-CHAT_MODEL = "llama3.2:3b-instruct-q8_0"
+CHAT_MODEL = "llama3.1"  # Menggunakan model Llama 3.2 3B Instruct
 
 RETRIEVAL_K = 20
 FINAL_CONTEXT_K = 8
@@ -43,6 +38,8 @@ MAX_DISTANCE = 0.60
 # sini, jadi context selalu kosong -> selalu fallback walau routing-nya benar.
 ROUTED_MAX_DISTANCE = 0.85
 DEBUG = True
+
+# Variabel FALLBACK manual dihapus karena sekarang diserahkan ke model
 
 
 # ============================================================
@@ -79,7 +76,7 @@ _NUMBER_WORDS = {
 
 _ABBREVIATION_ALIASES = (
     (r"\bp\s*\.?\s*m\s*\.?\s*b\s*\.?\b", "PMB penerimaan mahasiswa baru\n"),
-    (r"\bk\s*\.?\s*r\s*\.?\s*s\s*\.?\b", "KRS kartu rencana studi\n"),
+    (r"\bk\s*\.?\s*r\s*\.?\s\s*\.?\b", "KRS kartu rencana studi\n"),
     (r"\bp\s*\.?\s*r\s*\.?\s*o\s*\.?\s*d\s*\.?\s*i\s*\.?\b", "PRODI program studi\n"),
     (r"\bu\s*\.??\s*k\s*\.??\s*m\s*\.??\b", "UKM unit kegiatan mahasiswa\n"),
     (r"\bk\s*\.??\s*p\s*\.??\s*r\s*\.??\s*s\s*\.??\b", "KPRS kartu perubahan rencana studi"),
@@ -176,7 +173,7 @@ ATURAN BALASAN SESUAI KONTEKS:
 4. Jika pengguna BERTANYA HAL LAIN (seperti "lagi apa?", "kamu siapa?", "mau nanya"), jawab sesuai pertanyaan ringan mereka dengan gaya santai Gen-Z, lalu arahkan kembali agar mereka bertanya tentang PMB, KRS, atau biaya.
 
 KATA KUNCI LARANGAN KERAS:
-- HARUS menggunakan kata "kak" atau "kakak"! DILARANG menggunakan kata "Kamu".
+- HARUS menggunakan kata "kak" atau "kakak"!
 - DILARANG KERAS menggunakan kata "Kamu" atau "Anda" saat menyapa pengguna!
 - JANGAN PERNAH memberikan jawaban template "Sama-sama" jika pengguna tidak sedang berterima kasih!
 - JANGAN mengarang atau memberikan informasi akademik palsu di sini!
@@ -190,7 +187,7 @@ ROUTES = [
     ("BIAYA.docx", [
         "biaya", "berapa bayar", "berapa biaya", "nominal", "harga kuliah",
         "uang kuliah", "ukt", "pembayaran", "bayar", "cicilan", "cicil",
-        "biaya pendaftaran", "biaya registrasi",
+        "biaya pendaftaran", "biaya registrasi", "semua",
     ]),
     ("KALENDER.docx", [
         "jadwal", "tanggal", "tanggal pmb", "tanggal penerimaan", "kalender", 
@@ -204,12 +201,12 @@ ROUTES = [
         "perwalian online", "rencana studi", "mata kuliah", "perwalian",
     ]),
     ("PMB.docx", [
-        "pmb", "penerimaan mahasiswa baru", "mahasiswa baru",
+        "pmb", "penerimaan mahasiswa baru", "mahasiswa baru", "daftar",
         "calon mahasiswa", "pendaftaran", "mendaftar", "daftar kuliah",
         "syarat masuk", "syarat pendaftaran", "persyaratan masuk", "jalur masuk",
         "program studi", "prodi", "jurusan", "beasiswa", "ukm",
         "unit kegiatan mahasiswa", "profil kampus", "tentang kampus",
-        "tentang stt cipasung", 
+        "tentang stt cipasung", "ukt"
     ]),
 ]
 
@@ -218,20 +215,6 @@ def _route_text(text: str) -> str:
     text = text.lower()
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     return re.sub(r"\s+", " ", text).strip()
-
-
-# Dibangun OTOMATIS dari ROUTES: source -> himpunan keyword SATU-KATA saja
-# (frasa multi-kata dikeluarkan karena dicek pakai substring match, bukan
-# irisan set kata tunggal). Dipakai sebagai tie-break kalau skor Counter di
-# detect_route() masih terlalu dekat antar sumber. Sebelumnya ada beberapa
-# himpunan kata manual yang terpisah dari ROUTES -- risikonya, menambah
-# keyword baru ke ROUTES tidak otomatis ikut ke tie-break ini kecuali diketik
-# ulang manual. Sekarang otomatis sinkron, urutan prioritas mengikuti urutan
-# ROUTES (BIAYA -> KALENDER -> KRS -> PMB).
-_ROUTE_SINGLE_WORDS: dict[str, set[str]] = {
-    source: {kw for kw in keywords if " " not in kw}
-    for source, keywords in ROUTES
-}
 
 
 def detect_route(question: str) -> tuple[str | None, str]:
@@ -248,25 +231,18 @@ def detect_route(question: str) -> tuple[str | None, str]:
     if words & requirement_words and words & registration_words:
         return "PMB.docx", "prioritas syarat pendaftaran PMB"
 
-    # PRIORITAS KATA TANYA WAKTU: "kapan"/"tanggal"/"jadwal" (kata tunggal)
-    # ATAU frasa "info pmb"/"informasi pmb" (dua kata) HARUS menang duluan,
-    # sebelum scoring keyword biasa. Kenapa ini perlu: normalize_abbreviations()
-    # mengubah "pmb" jadi "PMB penerimaan mahasiswa baru" -- akibatnya frasa
-    # panjang ini ikut disisipkan ke teks query dan mendominasi skor Counter
-    # di bawah (bobotnya = jumlah kata di frasa, jadi "penerimaan mahasiswa
-    # baru" dapat bobot 3, sementara "kapan" cuma bobot 1). Tanpa aturan ini,
-    # pertanyaan "kapan pmb dibuka" selalu di-route paksa ke PMB.docx dan
-    # KALENDER.docx (tempat tanggal/jadwal sebenarnya disimpan) tidak pernah
-    # ikut dicari sama sekali karena routing pakai hard where-filter.
-    #
-    # CATATAN: frasa 2-kata ("info pmb"/"informasi pmb") WAJIB dicek pakai
-    # substring `in q`, BUKAN `words & ...` -- karena `words` cuma berisi
-    # kata TUNGGAL hasil q.split(), jadi tidak akan pernah cocok dengan frasa
-    # 2-kata lewat irisan set (bug ini pernah ada di versi sebelumnya).
-    time_words = {"kapan", "tanggal", "jadwal"}
-    time_phrases = {"info pmb", "informasi pmb"}
-    if (words & time_words) or any(phrase in q for phrase in time_phrases):
-        return "KALENDER.docx", "prioritas kata tanya waktu / info-informasi pmb"
+    # PRIORITAS KATA TANYA WAKTU: "kapan"/"tanggal"/"jadwal" HARUS menang
+    # duluan, sebelum scoring keyword biasa. Kenapa ini perlu: normalize_abbreviations()
+    # mengubah "pmb" jadi "PMB penerimaan mahasiswa baru" -- akibatnya frasa panjang
+    # ini ikut disisipkan ke teks query dan mendominasi skor Counter di bawah
+    # (bobotnya = jumlah kata di frasa, jadi "penerimaan mahasiswa baru" dapat
+    # bobot 3, sementara "kapan" cuma bobot 1). Tanpa aturan ini, pertanyaan
+    # "kapan pmb dibuka" selalu di-route paksa ke PMB.docx dan KALENDER.docx
+    # (tempat tanggal/jadwal sebenarnya disimpan) tidak pernah ikut dicari sama
+    # sekali karena routing pakai hard where-filter.
+    time_words = {"kapan", "tanggal", "jadwal", "info pmb", "informasi pmb"}
+    if words & time_words:
+        return "KALENDER.docx", "prioritas kata tanya waktu (kapan/tanggal/jadwal)"
 
     scores = Counter()
     matches = {}
@@ -293,16 +269,20 @@ def detect_route(question: str) -> tuple[str | None, str]:
     if best_score >= second_score + 2:
         return best_source, f"keyword={matches[best_source]}"
 
-    # Tie-break: skor masih terlalu dekat antar sumber. Cek sumber mana yang
-    # punya keyword SATU-KATA yang match, diambil OTOMATIS dari ROUTES
-    # (_ROUTE_SINGLE_WORDS) supaya selalu konsisten kalau ada keyword baru
-    # ditambahkan ke ROUTES. Urutan pengecekan mengikuti urutan ROUTES,
-    # sehingga prioritas antar-sumber tetap sama seperti sebelumnya
-    # (BIAYA -> KALENDER -> KRS -> PMB).
-    for source, single_words in _ROUTE_SINGLE_WORDS.items():
-        hit = words & single_words
-        if hit:
-            return source, f"tie-break kata tunggal: {sorted(hit)}"
+    if words & {"biaya", "bayar", "nominal", "ukt", "harga"}:
+        return "BIAYA.docx", "prioritas biaya/pembayaran"
+
+    if words & {"jadwal", "tanggal", "kapan", "kalender", "gelombang", }:
+        return "KALENDER.docx", "prioritas jadwal/tanggal"
+
+    if "krs" in words or "perwalian" in words:
+        return "KRS.docx", "prioritas KRS/perwalian"
+
+    if words & {"pmb", "pendaftaran", "prodi", "jurusan", "beasiswa", "daftar"}:
+        return "PMB.docx", "prioritas PMB/pendaftaran"
+    
+    if words & time_words or "info pmb" in q or "informasi pmb" in q:
+        return "KALENDER.docx", "prioritas kata tanya waktu atau info/informasi pmb"
 
     return None, "routing ambigu -> retrieval global"
 
@@ -396,23 +376,17 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
     distances = results.get("distances", [[]])[0]
     ids = results.get("ids", [[]])[0]
 
-    threshold = ROUTED_MAX_DISTANCE if route_source else MAX_DISTANCE
-
-    # Debug ini DIPINDAH ke SEBELUM guard "if not documents: return []" di
-    # bawah -- sebelumnya berada SETELAH guard itu, jadi kondisi
-    # "not documents" di dalam blok debug tidak akan pernah tercapai (sudah
-    # keburu return duluan). Pesan diagnostik pentingnya (mis. where-filter
-    # 0 hasil karena source metadata salah/tidak ada) jadi tidak pernah tampil.
-    if DEBUG:
-        print(f"\n📚 [RETRIEVAL] Target: {route_source or 'GLOBAL'} | Max Distance: {threshold}")
-        if not documents:
-            print("   ❌ ChromaDB tidak menemukan dokumen apapun (where-filter 0 hasil, atau collection kosong).")
-
     if not documents:
         return []
 
+    threshold = ROUTED_MAX_DISTANCE if route_source else MAX_DISTANCE
     q_tokens = meaningful_tokens(question)
     candidates = []
+
+    if DEBUG:
+        print(f"\n📚 [RETRIEVAL] Target: {route_source or 'GLOBAL'} | Max Distance: {threshold}")
+        if not documents:
+            print("   ❌ ChromaDB tidak menemukan dokumen apapun.")
 
     for doc_id, document, metadata, distance in zip(
         ids, documents, metadatas, distances
@@ -509,7 +483,8 @@ FALLBACK_TEXT = "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan ka
 # ke masalah yang sama.
 SYSTEM_PROMPT_WITH_CONTEXT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
 
-CONTEXT di bawah ini SUDAH DIPASTIKAN BERISI DATA PANDUAN YANG RELEVAN dengan pertanyaan. Kamu WAJIB menjawab dari situ -- JANGAN PERNAH bilang "tidak ditemukan" atau "tidak ada di panduan" untuk pertanyaan ini, karena datanya PASTI ada di CONTEXT.
+CONTEXT di bawah ini SUDAH DIPASTIKAN BERISI DATA PANDUAN YANG RELEVAN dengan pertanyaan. Kamu WAJIB menjawab dari situ!
+Apabila TIDAK ADA INFORMASI YANG RELEVAN di dalam CONTEXT, jawab dengan: "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!"
 
 ATURAN JAWABAN:
 - Jawab pertanyaan pengguna HANYA berdasarkan informasi faktual yang tertulis di dalam CONTEXT tersebut.
