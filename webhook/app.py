@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 # webhook/ dan rag/ adalah folder TERPISAH (sejajar), jadi perlu ditambahkan
 # ke sys.path dulu supaya query.py di folder rag/ bisa diimport dari sini
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rag"))
-from query import ask_minci  # noqa: E402
+from backup import ask_minci  # noqa: E402
 
 load_dotenv()
 

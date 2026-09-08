@@ -8,8 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
-from collections import Counter, defaultdict
+from collections import Counter
 
 import chromadb
 import ollama
@@ -186,7 +185,7 @@ ROUTES = [
     ("KALENDER.docx", [
         "jadwal", "tanggal", "tanggal pmb", "tanggal penerimaan", "kalender", "kapan", "gelombang",
         "pra ktmb", "ktmb", "hasil seleksi", "pengumuman", "seleksi",
-        "perwalian", "herregistrasi", "kprs", "cuti kuliah", "uts", "uas",
+        "perwalian", "herregistrasi", "kprs", "cuti kuliah", "uts", "uas", "informasi", "info"
     ]),
     ("KRS.docx", [
         "krs", "kartu rencana studi", "pengisian krs", "isi krs", "syarat krs",
@@ -364,9 +363,9 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
     candidates = []
 
     if DEBUG:
-        print(f"\n[RETRIEVE] where={route_source or '(global, semua dokumen)'} | threshold={threshold}")
+        print(f"\n📚 [RETRIEVAL] Target: {route_source or 'GLOBAL'} | Max Distance: {threshold}")
         if not documents:
-            print("[RETRIEVE] ChromaDB tidak mengembalikan dokumen apapun.")
+            print("   ❌ ChromaDB tidak menemukan dokumen apapun.")
 
     for doc_id, document, metadata, distance in zip(
         ids, documents, metadatas, distances
@@ -380,17 +379,20 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
         source = (metadata or {}).get("source", "?")
 
         lolos_distance = distance <= threshold
+        
+        # DEBUG CHUNK YANG LEBIH RAPI
         if DEBUG:
-            status = "✅ lolos" if lolos_distance else "❌ DIBUANG (distance > threshold)"
-            print(f"    distance={distance:.4f}  overlap={overlap}  intent={intent}  source={source}  -> {status}")
-            print(f"       {document[:120].replace(chr(10), ' ')}...")
+            status = "✅ LOLOS" if lolos_distance else "❌ DIBUANG (Dist > Threshold)"
+            snippet = document[:70].replace(chr(10), ' ').strip() + "..."
+            print(f"   ├─ [{source}] Dist: {distance:.4f} | Intent: {intent} | Overlap: {overlap} | {status}")
+            print(f"   │  L__ '{snippet}'")
 
         if not lolos_distance:
             continue
 
         if route_source is None and len(q_tokens) >= 2 and overlap < 1:
             if DEBUG:
-                print(f"       -> DIBUANG (overlap gate, tidak ada kata kunci konten sama; global search)")
+                print(f"   └─ ❌ DIBUANG (Overlap < 1 pada Global Search)")
             continue
 
         candidates.append({
@@ -498,52 +500,8 @@ def clean_output(text: str) -> str:
     return text.strip()
 
 
-# ============================================================
-# RIWAYAT PERCAKAPAN (per user) -- auto-hapus setelah 1 jam
-# ============================================================
-
-HISTORY_TTL_SECONDS = 3600
-MAX_HISTORY_TURNS = 6
-
-_conversation_history: dict[str, list[dict]] = defaultdict(list)
-
-
-def _prune_expired_history(now: float | None = None) -> None:
-    now = now if now is not None else time.time()
-    empty_users = []
-    for user_id, messages in _conversation_history.items():
-        fresh = [m for m in messages if now - m["ts"] <= HISTORY_TTL_SECONDS]
-        if fresh:
-            _conversation_history[user_id] = fresh
-        else:
-            empty_users.append(user_id)
-    for user_id in empty_users:
-        del _conversation_history[user_id]
-
-
-def _remember(user_id: str, role: str, content: str) -> None:
-    _conversation_history[user_id].append({"role": role, "content": content, "ts": time.time()})
-
-
-_FOLLOWUP_HINT_WORDS = {
-    "itu", "tadi", "tersebut", "lanjut", "terus", "trus", "kalau", "gimana",
-    "berarti", "jadi", "nah", "terusan", "lah", "dong",
-}
-
-
-def _looks_like_followup(question: str) -> bool:
-    words = set(re.findall(r"[a-z0-9]+", question.lower()))
-    return len(words) <= 4 or bool(words & _FOLLOWUP_HINT_WORDS)
-
-
-def ask_minci(question: str, user_id: str = "default") -> str:
+def ask_minci(question: str) -> str:
     question = normalize_query(question)
-
-    _prune_expired_history()
-    
-    # Ambil riwayat percakapan untuk dikonversi ke format Google GenAI contents/history
-    raw_history = _conversation_history.get(user_id, [])
-    trimmed_history = raw_history[-(MAX_HISTORY_TURNS * 2):]
 
     if not question:
         return "Ada yang bisa Minci bantu, kak?"
@@ -551,29 +509,16 @@ def ask_minci(question: str, user_id: str = "default") -> str:
     # --- Chitchat bypass via Gemini API ---
     if is_chitchat(question):
         if DEBUG:
-            print(f"\n[CHITCHAT] '{question}' terdeteksi basa-basi -> skip RAG")
+            print(f"\n💬 [CHITCHAT] '{question}' terdeteksi basa-basi -> Skip RAG")
         try:
-            # Membentuk history percakapan untuk client.chats.create / contents
-            chat_contents = []
-            for m in trimmed_history:
-                role_mapped = "user" if m["role"] == "user" else "model"
-                chat_contents.append(
-                    types.Content(
-                        role=role_mapped,
-                        parts=[types.Part.from_text(text=m["content"])]
-                    )
-                )
-            # Tambahkan pesan user saat ini
-            chat_contents.append(
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=question)]
-                )
-            )
-
             response = gemini_client.models.generate_content(
                 model=CHAT_MODEL,
-                contents=chat_contents,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[types.Part.from_text(text=question)]
+                    )
+                ],
                 config=types.GenerateContentConfig(
                     system_instruction=CHITCHAT_SYSTEM_PROMPT,
                     temperature=0.4,
@@ -583,79 +528,51 @@ def ask_minci(question: str, user_id: str = "default") -> str:
             )
             answer = clean_output(response.text or "")
         except Exception as exc:
-            if DEBUG: print(f"[LLM] chitchat error (Gemini): {exc}")
+            if DEBUG: print(f"⚠️ [LLM] chitchat error (Gemini): {exc}")
             answer = "Halo kak! Ada yang bisa Minci bantu?"
 
-        _remember(user_id, "user", question)
-        _remember(user_id, "assistant", answer)
         return answer
 
     if _collection.count() == 0:
-        if DEBUG: print("[RAG] collection kosong")
+        if DEBUG: print("⚠️ [RAG] Collection ChromaDB kosong!")
 
-    retrieval_query = question
-    if _looks_like_followup(question) and trimmed_history:
-        previous_user_questions = [m["content"] for m in trimmed_history if m["role"] == "user"]
-        if previous_user_questions:
-            retrieval_query = f"{previous_user_questions[-1]} {question}"
-            if DEBUG:
-                print(f"[FOLLOWUP] Query retrieval digabung jadi: {retrieval_query!r}")
-
-    route_source, route_reason = detect_route(retrieval_query)
+    route_source, route_reason = detect_route(question)
 
     if DEBUG:
-        print("\n" + "=" * 70)
-        print(f"[QUERY] {question}")
-        print(f"[ROUTE] {route_source or 'GLOBAL'}")
-        print(f"[WHY]   {route_reason}")
-        print("=" * 70)
+        print(f"\n🔍 [QUERY] : {question}")
+        print(f"🔀 [ROUTE] : {route_source or 'GLOBAL'} (Alasan: {route_reason})")
 
     try:
-        chunks = retrieve(retrieval_query, route_source=route_source)
+        chunks = retrieve(question, route_source=route_source)
     except Exception as exc:
-        print(f"[RAG] retrieval error: {exc}")
+        print(f"⚠️ [RAG] retrieval error: {exc}")
         chunks = []
 
     if not chunks:
         if DEBUG:
-            print("[RAG] Tidak ada chunk relevan -> fallback deterministik, LLM TIDAK dipanggil.")
-        _remember(user_id, "user", question)
-        _remember(user_id, "assistant", FALLBACK_TEXT)
+            print("🛑 [RAG] Tidak ada chunk relevan -> Fallback LLM TIDAK dipanggil.")
         return FALLBACK_TEXT
 
     context = build_context(chunks)
 
+    # DEBUG CONTEXT YANG JAUH LEBIH BERSIH (Tidak mem-print semua isi teks)
     if DEBUG:
-        print("\n" + "=" * 70)
-        print("[CONTEXT YANG DIKIRIM KE GEMINI]")
-        print("=" * 70)
-        print(context)
-        print("=" * 70)
+        print(f"\n📑 [CONTEXT KE GEMINI] Berhasil memuat {len(chunks)} chunks:")
+        for i, c in enumerate(chunks, 1):
+            src = c['metadata'].get('source', '?')
+            print(f"   {i}. {src} (Dist: {c['distance']:.4f})")
 
     try:
-        # Konversi riwayat lokal ke format `types.Content` untuk Gemini API
-        chat_contents = []
-        for m in trimmed_history:
-            role_mapped = "user" if m["role"] == "user" else "model"
-            chat_contents.append(
-                types.Content(
-                    role=role_mapped,
-                    parts=[types.Part.from_text(text=m["content"])]
-                )
-            )
-        
-        # Tambahkan prompt utama yang berisi context dan pertanyaan saat ini
         final_prompt = build_user_prompt(question, context)
-        chat_contents.append(
-            types.Content(
-                role="user",
-                parts=[types.Part.from_text(text=final_prompt)]
-            )
-        )
 
         response = gemini_client.models.generate_content(
             model=CHAT_MODEL,
-            contents=chat_contents,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=final_prompt)]
+                )
+            ],
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT_WITH_CONTEXT,
                 temperature=0.1,
@@ -663,14 +580,11 @@ def ask_minci(question: str, user_id: str = "default") -> str:
             ),
         )
     except Exception as exc:
-        print(f"[LLM] error (Gemini): {exc}")
+        print(f"⚠️ [LLM] error (Gemini): {exc}")
         return "Maaf kak, sistem Minci sedang gangguan. Coba lagi nanti ya!"
 
     raw_answer = response.text or ""
     answer = clean_output(raw_answer)
-
-    _remember(user_id, "user", question)
-    _remember(user_id, "assistant", answer)
 
     return answer
 
@@ -690,5 +604,7 @@ if __name__ == "__main__":
             break
 
         answer = ask_minci(q)
+        print(f" ")
         print(f"\nKamu: {q}")
         print(f"Minci: {answer}\n")
+        print(f" ")

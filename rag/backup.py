@@ -1,9 +1,14 @@
 """
 Pure RAG query.py untuk Minci.
 - Semua pertanyaan akademik melewati retrieval.
-- Routing memilih source ChromaDB.
-- Model SELALU dipanggil, bahkan ketika context kosong.
-- Fallback sepenuhnya di-handle oleh System Prompt Llama 3.2.
+- Routing memilih source ChromaDB. Tie-break routing dibangun OTOMATIS dari
+  daftar keyword di ROUTES (lihat _ROUTE_SINGLE_WORDS) -- jadi menambah
+  keyword baru ke ROUTES otomatis konsisten di semua jalur routing, tidak
+  perlu diketik ulang manual di tempat lain.
+- Keputusan "context ada isinya atau tidak" diambil di KODE, bukan diserahkan
+  ke model. Kalau retrieval tidak menemukan chunk relevan, ask_minci()
+  langsung mengembalikan FALLBACK_TEXT tanpa memanggil LLM sama sekali. Model
+  HANYA dipanggil ketika context sudah dipastikan ada isinya.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ CHROMA_DB_DIR = os.path.join(BASE_DIR, "database", "chroma_db")
 COLLECTION_NAME = "minci_dokumen"
 
 EMBED_MODEL = "bge-m3"
-CHAT_MODEL = "qwen2.5:3b"
+CHAT_MODEL = "llama3.2:3b-instruct-q8_0"
 
 RETRIEVAL_K = 20
 FINAL_CONTEXT_K = 8
@@ -38,8 +43,6 @@ MAX_DISTANCE = 0.60
 # sini, jadi context selalu kosong -> selalu fallback walau routing-nya benar.
 ROUTED_MAX_DISTANCE = 0.85
 DEBUG = True
-
-# Variabel FALLBACK manual dihapus karena sekarang diserahkan ke model
 
 
 # ============================================================
@@ -76,7 +79,7 @@ _NUMBER_WORDS = {
 
 _ABBREVIATION_ALIASES = (
     (r"\bp\s*\.?\s*m\s*\.?\s*b\s*\.?\b", "PMB penerimaan mahasiswa baru\n"),
-    (r"\bk\s*\.?\s*r\s*\.?\s\s*\.?\b", "KRS kartu rencana studi\n"),
+    (r"\bk\s*\.?\s*r\s*\.?\s*s\s*\.?\b", "KRS kartu rencana studi\n"),
     (r"\bp\s*\.?\s*r\s*\.?\s*o\s*\.?\s*d\s*\.?\s*i\s*\.?\b", "PRODI program studi\n"),
     (r"\bu\s*\.??\s*k\s*\.??\s*m\s*\.??\b", "UKM unit kegiatan mahasiswa\n"),
     (r"\bk\s*\.??\s*p\s*\.??\s*r\s*\.??\s*s\s*\.??\b", "KPRS kartu perubahan rencana studi"),
@@ -173,7 +176,7 @@ ATURAN BALASAN SESUAI KONTEKS:
 4. Jika pengguna BERTANYA HAL LAIN (seperti "lagi apa?", "kamu siapa?", "mau nanya"), jawab sesuai pertanyaan ringan mereka dengan gaya santai Gen-Z, lalu arahkan kembali agar mereka bertanya tentang PMB, KRS, atau biaya.
 
 KATA KUNCI LARANGAN KERAS:
-- HARUS menggunakan kata "kak" atau "kakak" di setiap kalimat!
+- HARUS menggunakan kata "kak" atau "kakak"! DILARANG menggunakan kata "Kamu".
 - DILARANG KERAS menggunakan kata "Kamu" atau "Anda" saat menyapa pengguna!
 - JANGAN PERNAH memberikan jawaban template "Sama-sama" jika pengguna tidak sedang berterima kasih!
 - JANGAN mengarang atau memberikan informasi akademik palsu di sini!
@@ -190,9 +193,10 @@ ROUTES = [
         "biaya pendaftaran", "biaya registrasi",
     ]),
     ("KALENDER.docx", [
-        "jadwal", "tanggal", "tanggal pmb", "tanggal penerimaan", "kalender", "kapan", "gelombang",
-        "pra ktmb", "ktmb", "hasil seleksi", "pengumuman", "seleksi",
-        "perwalian", "herregistrasi", "kprs", "cuti kuliah", "uts", "uas",
+        "jadwal", "tanggal", "tanggal pmb", "tanggal penerimaan", "kalender", 
+        "kapan", "gelombang", "pra ktmb", "ktmb", "hasil seleksi", "pengumuman", 
+        "seleksi", "perwalian", "herregistrasi", "kprs", "cuti kuliah", "uts",
+        "uas", "informasi pmb", "info pmb",
     ]),
     ("KRS.docx", [
         "krs", "kartu rencana studi", "pengisian krs", "isi krs", "syarat krs",
@@ -205,7 +209,7 @@ ROUTES = [
         "syarat masuk", "syarat pendaftaran", "persyaratan masuk", "jalur masuk",
         "program studi", "prodi", "jurusan", "beasiswa", "ukm",
         "unit kegiatan mahasiswa", "profil kampus", "tentang kampus",
-        "tentang stt cipasung",
+        "tentang stt cipasung", 
     ]),
 ]
 
@@ -214,6 +218,20 @@ def _route_text(text: str) -> str:
     text = text.lower()
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+# Dibangun OTOMATIS dari ROUTES: source -> himpunan keyword SATU-KATA saja
+# (frasa multi-kata dikeluarkan karena dicek pakai substring match, bukan
+# irisan set kata tunggal). Dipakai sebagai tie-break kalau skor Counter di
+# detect_route() masih terlalu dekat antar sumber. Sebelumnya ada beberapa
+# himpunan kata manual yang terpisah dari ROUTES -- risikonya, menambah
+# keyword baru ke ROUTES tidak otomatis ikut ke tie-break ini kecuali diketik
+# ulang manual. Sekarang otomatis sinkron, urutan prioritas mengikuti urutan
+# ROUTES (BIAYA -> KALENDER -> KRS -> PMB).
+_ROUTE_SINGLE_WORDS: dict[str, set[str]] = {
+    source: {kw for kw in keywords if " " not in kw}
+    for source, keywords in ROUTES
+}
 
 
 def detect_route(question: str) -> tuple[str | None, str]:
@@ -230,18 +248,25 @@ def detect_route(question: str) -> tuple[str | None, str]:
     if words & requirement_words and words & registration_words:
         return "PMB.docx", "prioritas syarat pendaftaran PMB"
 
-    # PRIORITAS KATA TANYA WAKTU: "kapan"/"tanggal"/"jadwal" HARUS menang
-    # duluan, sebelum scoring keyword biasa. Kenapa ini perlu: normalize_abbreviations()
-    # mengubah "pmb" jadi "PMB penerimaan mahasiswa baru" -- akibatnya frasa panjang
-    # ini ikut disisipkan ke teks query dan mendominasi skor Counter di bawah
-    # (bobotnya = jumlah kata di frasa, jadi "penerimaan mahasiswa baru" dapat
-    # bobot 3, sementara "kapan" cuma bobot 1). Tanpa aturan ini, pertanyaan
-    # "kapan pmb dibuka" selalu di-route paksa ke PMB.docx dan KALENDER.docx
-    # (tempat tanggal/jadwal sebenarnya disimpan) tidak pernah ikut dicari sama
-    # sekali karena routing pakai hard where-filter.
+    # PRIORITAS KATA TANYA WAKTU: "kapan"/"tanggal"/"jadwal" (kata tunggal)
+    # ATAU frasa "info pmb"/"informasi pmb" (dua kata) HARUS menang duluan,
+    # sebelum scoring keyword biasa. Kenapa ini perlu: normalize_abbreviations()
+    # mengubah "pmb" jadi "PMB penerimaan mahasiswa baru" -- akibatnya frasa
+    # panjang ini ikut disisipkan ke teks query dan mendominasi skor Counter
+    # di bawah (bobotnya = jumlah kata di frasa, jadi "penerimaan mahasiswa
+    # baru" dapat bobot 3, sementara "kapan" cuma bobot 1). Tanpa aturan ini,
+    # pertanyaan "kapan pmb dibuka" selalu di-route paksa ke PMB.docx dan
+    # KALENDER.docx (tempat tanggal/jadwal sebenarnya disimpan) tidak pernah
+    # ikut dicari sama sekali karena routing pakai hard where-filter.
+    #
+    # CATATAN: frasa 2-kata ("info pmb"/"informasi pmb") WAJIB dicek pakai
+    # substring `in q`, BUKAN `words & ...` -- karena `words` cuma berisi
+    # kata TUNGGAL hasil q.split(), jadi tidak akan pernah cocok dengan frasa
+    # 2-kata lewat irisan set (bug ini pernah ada di versi sebelumnya).
     time_words = {"kapan", "tanggal", "jadwal"}
-    if words & time_words:
-        return "KALENDER.docx", "prioritas kata tanya waktu (kapan/tanggal/jadwal)"
+    time_phrases = {"info pmb", "informasi pmb"}
+    if (words & time_words) or any(phrase in q for phrase in time_phrases):
+        return "KALENDER.docx", "prioritas kata tanya waktu / info-informasi pmb"
 
     scores = Counter()
     matches = {}
@@ -268,17 +293,16 @@ def detect_route(question: str) -> tuple[str | None, str]:
     if best_score >= second_score + 2:
         return best_source, f"keyword={matches[best_source]}"
 
-    if words & {"biaya", "bayar", "nominal", "ukt", "harga"}:
-        return "BIAYA.docx", "prioritas biaya/pembayaran"
-
-    if words & {"jadwal", "tanggal", "kapan", "kalender", "gelombang"}:
-        return "KALENDER.docx", "prioritas jadwal/tanggal"
-
-    if "krs" in words or "perwalian" in words:
-        return "KRS.docx", "prioritas KRS/perwalian"
-
-    if words & {"pmb", "pendaftaran", "prodi", "jurusan", "beasiswa"}:
-        return "PMB.docx", "prioritas PMB/pendaftaran"
+    # Tie-break: skor masih terlalu dekat antar sumber. Cek sumber mana yang
+    # punya keyword SATU-KATA yang match, diambil OTOMATIS dari ROUTES
+    # (_ROUTE_SINGLE_WORDS) supaya selalu konsisten kalau ada keyword baru
+    # ditambahkan ke ROUTES. Urutan pengecekan mengikuti urutan ROUTES,
+    # sehingga prioritas antar-sumber tetap sama seperti sebelumnya
+    # (BIAYA -> KALENDER -> KRS -> PMB).
+    for source, single_words in _ROUTE_SINGLE_WORDS.items():
+        hit = words & single_words
+        if hit:
+            return source, f"tie-break kata tunggal: {sorted(hit)}"
 
     return None, "routing ambigu -> retrieval global"
 
@@ -372,17 +396,23 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
     distances = results.get("distances", [[]])[0]
     ids = results.get("ids", [[]])[0]
 
+    threshold = ROUTED_MAX_DISTANCE if route_source else MAX_DISTANCE
+
+    # Debug ini DIPINDAH ke SEBELUM guard "if not documents: return []" di
+    # bawah -- sebelumnya berada SETELAH guard itu, jadi kondisi
+    # "not documents" di dalam blok debug tidak akan pernah tercapai (sudah
+    # keburu return duluan). Pesan diagnostik pentingnya (mis. where-filter
+    # 0 hasil karena source metadata salah/tidak ada) jadi tidak pernah tampil.
+    if DEBUG:
+        print(f"\n📚 [RETRIEVAL] Target: {route_source or 'GLOBAL'} | Max Distance: {threshold}")
+        if not documents:
+            print("   ❌ ChromaDB tidak menemukan dokumen apapun (where-filter 0 hasil, atau collection kosong).")
+
     if not documents:
         return []
 
-    threshold = ROUTED_MAX_DISTANCE if route_source else MAX_DISTANCE
     q_tokens = meaningful_tokens(question)
     candidates = []
-
-    if DEBUG:
-        print(f"\n[RETRIEVE] where={route_source or '(global, semua dokumen)'} | threshold={threshold}")
-        if not documents:
-            print("[RETRIEVE] ChromaDB tidak mengembalikan dokumen apapun (where-filter mungkin 0 hasil, atau collection kosong).")
 
     for doc_id, document, metadata, distance in zip(
         ids, documents, metadatas, distances
@@ -396,20 +426,20 @@ def retrieve(question: str, route_source: str | None) -> list[dict]:
         source = (metadata or {}).get("source", "?")
 
         lolos_distance = distance <= threshold
+        
+        # DEBUG CHUNK YANG LEBIH RAPI
         if DEBUG:
-            status = "✅ lolos" if lolos_distance else "❌ DIBUANG (distance > threshold)"
-            print(f"    distance={distance:.4f}  overlap={overlap}  intent={intent}  source={source}  -> {status}")
-            print(f"       {document[:120].replace(chr(10), ' ')}...")
+            status = "✅ LOLOS" if lolos_distance else "❌ DIBUANG (Dist > Threshold)"
+            snippet = document[:70].replace(chr(10), ' ').strip() + "..."
+            print(f"   ├─ [{source}] Dist: {distance:.4f} | Intent: {intent} | Overlap: {overlap} | {status}")
+            print(f"   │  L__ '{snippet}'")
 
         if not lolos_distance:
             continue
 
-        # Route sudah membatasi dokumen ke sumber yang relevan. Jangan buang
-        # chunk teratas hanya karena bentuk katanya berbeda, misalnya
-        # "syarat" vs "persyaratan" atau "daftar" vs "pendaftaran".
         if route_source is None and len(q_tokens) >= 2 and overlap < 1:
             if DEBUG:
-                print(f"       -> DIBUANG (overlap gate, tidak ada kata kunci konten sama; global search)")
+                print(f"   └─ ❌ DIBUANG (Overlap < 1 pada Global Search)")
             continue
 
         candidates.append({
@@ -491,7 +521,7 @@ ATURAN JAWABAN:
 - Jika pertanyaan meminta "biaya", "bayar", atau "nominal", berikan SEMUA INFORMASI BESERTA KETERANGANNYA.
 
 ATURAN WAJIB UNTUK SEMUA JAWABAN:
-- HARUS menggunakan kata "kak" atau "kakak" di SETIAP kalimat! DILARANG menggunakan kata "Kamu".
+- HARUS menggunakan kata "kak" atau "kakak"! DILARANG menggunakan kata "Kamu".
 - Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
 - JANGAN PERNAH menyebutkan kata teknis seperti "context", "metadata", "chunk", atau "RAG".
 - JANGAN menyebut nomor bagian internal seperti "CHUNK 1", "CHUNK 5", atau "CHUNK 6". Langsung sebutkan informasi dan tanggalnya.
@@ -555,14 +585,13 @@ def ask_minci(question: str) -> str:
     """
     question = normalize_query(question)
 
-    # Tetap sediakan fallback error ringan jika pertanyaan benar-benar kosong
     if not question:
         return "Ada yang bisa Minci bantu, kak?"
 
-       # --- Chitchat bypass: basa-basi langsung ke model TANPA RAG ---
+    # --- Chitchat bypass: basa-basi langsung ke model TANPA RAG ---
     if is_chitchat(question):
         if DEBUG:
-            print(f"\n[CHITCHAT] '{question}' terdeteksi basa-basi -> skip RAG")
+            print(f"\n💬 [CHITCHAT] '{question}' terdeteksi basa-basi -> Skip RAG")
         try:
             response = ollama.chat(
                 model=CHAT_MODEL,
@@ -571,61 +600,47 @@ def ask_minci(question: str) -> str:
                     {"role": "user", "content": question},
                 ],
                 options={
-                    "temperature": 0.4,     # Naik sedikit ke 0.4 agar gaya Gen-Z nya lebih natural & tidak kaku
-                    "top_p": 0.9,           # Membatasi pilihan kata agar tetap masuk akal
-                    "num_predict": 100,     # Batasan respons chitchat pendek (maksimal ~100 token)
+                    "temperature": 0.4,
+                    "top_p": 0.9,
+                    "num_predict": 100,
                 },
             )
             return clean_output(response.get("message", {}).get("content", ""))
         except Exception as exc:
-            if DEBUG: print(f"[LLM] chitchat error: {exc}")
+            if DEBUG: print(f"⚠️ [LLM] chitchat error: {exc}")
             return "Halo kak! Ada yang bisa Minci bantu?"
 
 
     if _collection.count() == 0:
-        if DEBUG: print("[RAG] collection kosong")
-        # Biarkan model merespons dengan context kosong
+        if DEBUG: print("⚠️ [RAG] Collection ChromaDB kosong!")
 
     route_source, route_reason = detect_route(question)
 
     if DEBUG:
-        print("\n" + "=" * 70)
-        print(f"[QUERY] {question}")
-        print(f"[ROUTE] {route_source or 'GLOBAL'}")
-        print(f"[WHY]   {route_reason}")
-        print("=" * 70)
+        print(f"\n🔍 [QUERY] : {question}")
+        print(f"🔀 [ROUTE] : {route_source or 'GLOBAL'} (Alasan: {route_reason})")
 
     try:
         chunks = retrieve(question, route_source=route_source)
     except Exception as exc:
-        if DEBUG: print(f"[RAG] retrieval error: {exc}")
+        if DEBUG: print(f"⚠️ [RAG] retrieval error: {exc}")
         chunks = []
 
-    # --- Keputusan "ada data atau tidak" diambil di KODE, bukan diserahkan
-    # ke model. Sebelumnya context kosong tetap dikirim ke LLM dengan harapan
-    # dia "membaca" instruksi KONDISI 1 dan menyimpulkan sendiri -- tapi itu
-    # juga berarti ketika context ADA ISINYA, model tetap harus "membuktikan
-    # sendiri" bahwa ini bukan kasus KONDISI 1, dan model 3B kadang salah
-    # simpul (lihat kasus "syarat pendaftaran" yang tetap fallback padahal
-    # context-nya lengkap). Dengan cek eksplisit di sini, model HANYA PERNAH
-    # melihat prompt yang isinya SUDAH DIPASTIKAN ada datanya, dan bahkan tidak
-    # pernah dipanggil sama sekali kalau memang tidak ada apa-apa untuk dijawab.
     if not chunks:
         if DEBUG:
-            print("[RAG] Tidak ada chunk relevan -> fallback deterministik, LLM TIDAK dipanggil.")
+            print("🛑 [RAG] Tidak ada chunk relevan -> Fallback LLM TIDAK dipanggil.")
         return FALLBACK_TEXT
 
     context = build_context(chunks)
 
+    # DEBUG CONTEXT YANG JAUH LEBIH BERSIH
     if DEBUG:
-        print("\n" + "=" * 70)
-        print("[CONTEXT YANG DIKIRIM KE MODEL]")
-        print("=" * 70)
-        print(context)
-        print("=" * 70)
+        print(f"\n📑 [CONTEXT KE MODEL] Berhasil memuat {len(chunks)} chunks:")
+        for i, c in enumerate(chunks, 1):
+            src = c['metadata'].get('source', '?')
+            print(f"   {i}. {src} (Dist: {c['distance']:.4f})")
 
     try:
-        # PENTING: Gunakan format ini agar Ollama menyuntikkan template chat Llama 3.2 secara benar
         response = ollama.chat(
             model=CHAT_MODEL,
             messages=[
@@ -639,24 +654,18 @@ def ask_minci(question: str) -> str:
                 },
             ],
             options={
-                "temperature": 0.1,    # Sudah benar (rendah agar konsisten)
+                "temperature": 0.1,
                 "num_predict": 1024,
-                # Tambahkan parameter di bawah ini jika model masih suka tidak patuh:
-                # "top_p": 0.9,
             },
         )
     except Exception as exc:
-        if DEBUG: print(f"[LLM] error: {exc}")
+        if DEBUG: print(f"⚠️ [LLM] error: {exc}")
         return "Maaf kak, sistem Minci sedang gangguan. Coba lagi nanti ya!"
 
     raw_answer = response.get("message", {}).get("content", "")
-    if DEBUG:
-        print("\n[RAW LLM OUTPUT sebelum clean_output]")
-        print(raw_answer)
     answer = clean_output(raw_answer)
 
     return answer
-
 
 # ============================================================
 # TEST TERMINAL
