@@ -5,7 +5,13 @@ Jalankan: python check_chroma.py
 
 from __future__ import annotations
 import os
+import logging
+
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+
 import chromadb
+
+logging.getLogger("chromadb.telemetry.product.posthog").disabled = True
 
 # Tentukan direktori database ChromaDB yang digunakan
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

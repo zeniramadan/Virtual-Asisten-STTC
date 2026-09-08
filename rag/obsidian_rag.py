@@ -8,9 +8,15 @@ import os
 import re
 import sys
 import json
+import logging
+
+# Disable ChromaDB telemetry before importing the library.
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 import chromadb
 import ollama
+
+logging.getLogger("chromadb.telemetry.product.posthog").disabled = True
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
@@ -32,7 +38,8 @@ DEBUG = True
 _STOPWORDS = {
     "yang", "dan", "atau", "di", "ke", "dari", "untuk", "dengan",
     "ini", "itu", "ada", "apa", "apakah", "bagaimana", "berapa",
-    "kapan", "dimana", "mana", "saja", "aja", "adalah", "pada",
+    "kapan", "dimana", "mana", "saja", "aja", "adalah", "pada", "min",
+    "nya", "sih", "siapa", "kamu", "anda", "kak", "kakak",
 }
 
 # ============================================================
@@ -79,7 +86,7 @@ def is_chitchat(question: str) -> bool:
     return False
 
 
-CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
+CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu Generasi Z, ramah, dan ceria.
 
 TUGAS UTAMA:
 Jawab sapaan, salam, ucapan terima kasih, atau obrolan ringan (chitchat) dari pengguna dengan SINGKAT (maksimal 2 kalimat) dan super natural!
@@ -101,14 +108,34 @@ KATA KUNCI LARANGAN KERAS:
 # RETRIEVAL HELPERS
 # ============================================================
 
-os.environ["ANONYMIZED_TELEMETRY"] = "False"
-os.environ["CHROMA_SERVER_NO_telemetry"] = "True"
-
 def meaningful_tokens(text: str) -> set[str]:
     return {
         w for w in re.findall(r"[a-z0-9]+", text.lower())
         if len(w) >= 3 and w not in _STOPWORDS
     }
+
+
+def tag_tokens(metadata: dict) -> set[str]:
+    """Ubah metadata tags menjadi token yang bisa dibandingkan dengan query."""
+    tags = metadata.get("tags", "")
+    return meaningful_tokens(tags.replace("-", " ").replace("_", " "))
+
+
+def exact_tag_matches(question: str, metadata: dict) -> set[str]:
+    """Cari tag utuh yang muncul sebagai frasa di dalam pertanyaan."""
+    question_text = re.sub(r"[^a-z0-9\s]", " ", question.lower())
+    question_text = " ".join(question_text.split())
+    tags = {
+        tag.strip().lower()
+        for tag in metadata.get("tags", "").split(",")
+        if tag.strip()
+    }
+    return {
+        tag
+        for tag in tags
+        if f" {tag.replace('-', ' ')} " in f" {question_text} "
+    }
+
 
 def get_collection():
     client = chromadb.PersistentClient(
@@ -141,6 +168,8 @@ def retrieve_with_debug(question: str) -> list[dict]:
     for idx, (document, metadata, distance) in enumerate(zip(documents, metadatas, distances)):
         distance = float(distance)
         overlap = len(q_tokens & meaningful_tokens(document))
+        tag_overlap = len(q_tokens & tag_tokens(metadata or {}))
+        exact_tags = exact_tag_matches(question, metadata or {})
         
         passed_distance = distance <= MAX_DISTANCE
         passed_overlap = (len(q_tokens) < 2) or (overlap >= MIN_OVERLAP_IF_LONG_QUERY)
@@ -148,7 +177,10 @@ def retrieve_with_debug(question: str) -> list[dict]:
 
         status = "✅ LOLOS" if is_valid else "❌ DIBUANG"
         title = metadata.get('title', '?')
-        print(f"   [{idx+1}] Note: {title} | Jarak: {distance:.4f} | Overlap: {overlap} | Status: {status}")
+        print(
+            f"   [{idx+1}] Note: {title} | Jarak: {distance:.4f} | "
+            f"Overlap: {overlap} | Tag overlap: {tag_overlap} | Status: {status}"
+        )
 
         if not is_valid:
             continue
@@ -158,9 +190,22 @@ def retrieve_with_debug(question: str) -> list[dict]:
             "metadata": metadata,
             "distance": distance,
             "overlap": overlap,
+            "tag_overlap": tag_overlap,
+            "exact_tags": exact_tags,
         })
 
-    candidates.sort(key=lambda c: (c["distance"], -c["overlap"]))
+    exact_tag_candidates = [candidate for candidate in candidates if candidate["exact_tags"]]
+    if exact_tag_candidates:
+        candidates = exact_tag_candidates
+
+    candidates.sort(
+        key=lambda c: (
+            -len(c["exact_tags"]),
+            c["distance"],
+            -c["tag_overlap"],
+            -c["overlap"],
+        )
+    )
     final_chunks = candidates[:FINAL_CONTEXT_K]
     print(f"📌 [DEBUG] Total chunk terpilih untuk LLM: {len(final_chunks)}")
     print(f"{'='*50}\n")
@@ -171,19 +216,23 @@ def retrieve_with_debug(question: str) -> list[dict]:
 # LLM PROMPTS
 # ============================================================
 
-SYSTEM_PROMPT = """Kamu adalah asisten akademik yang menjawab pertanyaan tentang PMB, KRS, Jadwal dan Biaya..
+SYSTEM_PROMPT = """Kamu adalah asisten akademik yang menjawab pertanyaan tentang PMB, KRS, Jadwal dan Biaya. Gaya bicaramu Generasi Z, ramah, dan ceria.
 
-CONTEXT di bawah ini SUDAH DIPASTIKAN BERISI DATA PANDUAN YANG RELEVAN dengan pertanyaan. Kamu WAJIB menjawab dari situ!
+CONTEXT di bawah ini SUDAH DIPASTIKAN BERISI DATA PANDUAN YANG RELEVAN dengan pertanyaan.
+Apabila TIDAK ADA INFORMASI YANG RELEVAN di dalam CONTEXT, jawab dengan: "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!"
 
 ATURAN JAWABAN:
-- Jawab pertanyaan pengguna HANYA berdasarkan informasi faktual yang tertulis di dalam CONTEXT tersebut.
-- Jika bertanya tentang "daftar", "pendaftaran", JAWAB dengan SYARAT PENDAFTARAN.
+- JAWAB pertanyaan pengguna HANYA berdasarkan informasi faktual yang tertulis di dalam CONTEXT tersebut.
+- JIKA bertanya tentang "daftar", "pendaftaran", JAWAB dengan SYARAT PENDAFTARAN.
+- JIKA data dari CONTEXT berupa daftar, TAMPILKAN dalam bentuk daftar bullet (-) agar mudah dibaca.
 
 ATURAN WAJIB UNTUK SEMUA JAWABAN:
 - HARUS menggunakan kata "kak" atau "kakak"! DILARANG menggunakan kata "Kamu".
 - Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
 - JANGAN PERNAH menyebutkan kata teknis seperti "context", "metadata", "chunk", atau "RAG".
 - JANGAN menyebut nomor bagian internal seperti "CHUNK 1", "CHUNK 5", atau "CHUNK 6". Langsung sebutkan informasi dan tanggalnya.
+- JANGAN menyebut nama dokumen, seperti: "informasi ini ada di dokumen BIAYA".
+- JANGAN menyebut tempat informasi berada, seperti "informasi ini ada di tabel biaya".
 """
 
 # ============================================================

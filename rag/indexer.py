@@ -6,11 +6,17 @@ Jalankan ini: python indexer.py "/path/ke/vault"
 from __future__ import annotations
 import os
 import re
+import shutil
 import sys
+import logging
+
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 import chromadb
 import ollama
 import yaml
+
+logging.getLogger("chromadb.telemetry.product.posthog").disabled = True
 
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
 COLLECTION_NAME = "obsidian_vault"
@@ -81,9 +87,6 @@ def normalize_tags(tags: list[str]) -> list[str]:
             normalized.append(tag)
     return normalized
 
-os.environ["ANONYMIZED_TELEMETRY"] = "False"
-os.environ["CHROMA_SERVER_NO_telemetry"] = "True"
-
 def get_collection():
     client = chromadb.PersistentClient(
         path=DB_DIR,
@@ -92,6 +95,14 @@ def get_collection():
     return client.get_or_create_collection(
         COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
     )
+
+
+def reset_database() -> None:
+    """Hapus database ChromaDB lama sebelum indexing penuh."""
+    if os.path.isdir(DB_DIR):
+        shutil.rmtree(DB_DIR)
+        print(f"🗑️ Database lama dihapus: {DB_DIR}")
+
 
 def index_vault(vault_dir: str, force: bool = False) -> None:
     collection = get_collection()
@@ -166,5 +177,6 @@ if __name__ == "__main__":
         print(f"Error: Folder vault '{vault}' tidak ditemukan!")
         sys.exit(1)
 
+    reset_database()
     print(f"🚀 Memulai indexing vault dari: {vault} ...")
-    index_vault(vault, force=force)
+    index_vault(vault, force=True)

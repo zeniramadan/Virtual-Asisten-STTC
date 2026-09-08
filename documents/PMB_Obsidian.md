@@ -18,7 +18,7 @@ tags:
 
 ## Persyaratan Administrasi Pendaftaran
 
-#stt-cipasung #pmb #pendaftaran-mahasiswa-baru #persyaratan-pendaftaran #dokumen-pendaftaran
+#stt-cipasung #pmb #pendaftaran-mahasiswa-baru #persyaratan-pendaftaran #dokumen-pendaftaran #cara-masuk
 
 - Mengisi formulir pendaftaran - Online: s.id/pmbsttc
 - Membayar biaya pendaftaran

@@ -12,10 +12,9 @@ tags:
   - cicilan
   - biaya-semester
 ---
-
 ## Rincian Biaya Kuliah Stt Cipasung
 
-#stt-cipasung #akademik #biaya-kuliah #ukt #pembayaran #biaya-semester
+#stt-cipasung #akademik #biaya-kuliah #ukt #pembayaran #biaya-semester #biaya-awal #biaya-sidang #biaya-ta #biaya-kp #biaya-pendaftaran
 
 | Biaya              | Keterangan                                                                                                                                  | Jumlah (Rp) |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
