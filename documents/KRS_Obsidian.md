@@ -14,10 +14,9 @@ tags:
   - sks
   - ipk
 ---
-
 ## Panduan/Tata Cara/Cara Pengisian Kartu Rencana Studi (Krs)/Perwalian Online Untuk Mahasiswa
 
-#stt-cipasung #krs #kartu-rencana-studi #perwalian #panduan-krs
+#stt-cipasung #krs #kartu-rencana-studi #perwalian #panduan-krs #cara #cara-isi #cara-mengisi #cara-ngisi
 
 - Pastikan jaringan internet Anda stabil dan telah melakukan konfirmasi tagihan pembayaran ke Bagian Keuangan di kantor Tata Usaha.
 - Setelah terhubung dengan jaringan internet kampus, silahkan Anda masuk ke halaman http://31.58.158.149:8060/. Kemudian akan muncul tampilan sebagai berikut: (tampilan visual antarmuka login)

@@ -155,6 +155,7 @@ def retrieve_with_debug(question: str) -> list[dict]:
     print(f"🔍 [DEBUG] Pertanyaan: \"{question}\"")
     
     q_tokens = meaningful_tokens(question)
+    print(f"🧩 [DEBUG] Token pertanyaan: {sorted(q_tokens)}")
     collection = get_collection()
     embedding = ollama.embeddings(model=EMBED_MODEL, prompt=question)["embedding"]
 
@@ -167,8 +168,12 @@ def retrieve_with_debug(question: str) -> list[dict]:
     candidates = []
     for idx, (document, metadata, distance) in enumerate(zip(documents, metadatas, distances)):
         distance = float(distance)
-        overlap = len(q_tokens & meaningful_tokens(document))
-        tag_overlap = len(q_tokens & tag_tokens(metadata or {}))
+        document_tokens = meaningful_tokens(document)
+        metadata_tags = tag_tokens(metadata or {})
+        document_overlap = sorted(q_tokens & document_tokens)
+        tag_overlap_tokens = sorted(q_tokens & metadata_tags)
+        overlap = len(document_overlap)
+        tag_overlap = len(tag_overlap_tokens)
         exact_tags = exact_tag_matches(question, metadata or {})
         
         passed_distance = distance <= MAX_DISTANCE
@@ -181,6 +186,9 @@ def retrieve_with_debug(question: str) -> list[dict]:
             f"   [{idx+1}] Note: {title} | Jarak: {distance:.4f} | "
             f"Overlap: {overlap} | Tag overlap: {tag_overlap} | Status: {status}"
         )
+        print(f"       Kata isi yang cocok: {document_overlap or '-'}")
+        print(f"       Kata tag yang cocok: {tag_overlap_tokens or '-'}")
+        print(f"       Exact tag: {sorted(exact_tags) or '-'}")
 
         if not is_valid:
             continue
@@ -219,12 +227,14 @@ def retrieve_with_debug(question: str) -> list[dict]:
 SYSTEM_PROMPT = """Kamu adalah asisten akademik yang menjawab pertanyaan tentang PMB, KRS, Jadwal dan Biaya. Gaya bicaramu Generasi Z, ramah, dan ceria.
 
 CONTEXT di bawah ini SUDAH DIPASTIKAN BERISI DATA PANDUAN YANG RELEVAN dengan pertanyaan.
-Apabila TIDAK ADA INFORMASI YANG RELEVAN di dalam CONTEXT, jawab dengan: "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!"
+SEBELUM menjawab, BACA dan PAHAMI seluruh CONTEXT dan PERTANYAAN dengan seksama.
+Apabila TIDAK ADA INFORMASI YANG RELEVAN di dalam CONTEXT, JANGAN MENGARANG, JAWAB dengan: "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!".
 
 ATURAN JAWABAN:
 - JAWAB pertanyaan pengguna HANYA berdasarkan informasi faktual yang tertulis di dalam CONTEXT tersebut.
 - JIKA bertanya tentang "daftar", "pendaftaran", JAWAB dengan SYARAT PENDAFTARAN.
 - JIKA data dari CONTEXT berupa daftar, TAMPILKAN dalam bentuk daftar bullet (-) agar mudah dibaca.
+- JIKA bertanya tentang "Pengisian KRS", SEBUTKAN SEMUA langkah pengisian KRS yang ada di CONTEXT, jangan ada yang terlewat.
 
 ATURAN WAJIB UNTUK SEMUA JAWABAN:
 - HARUS menggunakan kata "kak" atau "kakak"! DILARANG menggunakan kata "Kamu".
