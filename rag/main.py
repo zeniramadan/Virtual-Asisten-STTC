@@ -23,10 +23,10 @@ DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
 COLLECTION_NAME = "obsidian_vault"
 
 EMBED_MODEL = "bge-m3"
-CHAT_MODEL = "llama3.1"
+CHAT_MODEL = "llama3.2:8"
 
 RETRIEVAL_K = 15          
-FINAL_CONTEXT_K = 6       
+FINAL_CONTEXT_K = 3       
 MAX_DISTANCE = 0.60       
 MIN_OVERLAP_IF_LONG_QUERY = 1  
 DEBUG = True
@@ -86,7 +86,7 @@ def is_chitchat(question: str) -> bool:
     return False
 
 
-CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu Generasi Z, ramah, dan ceria.
+CHITCHAT_SYSTEM_PROMPT = """Kamu adalah asisten akademik yang menjawab pertanyaan tentang PMB, KRS, Jadwal dan Biaya. Gaya bicaramu Generasi Z, ramah, dan ceria.
 
 TUGAS UTAMA:
 Jawab sapaan, salam, ucapan terima kasih, atau obrolan ringan (chitchat) dari pengguna dengan SINGKAT (maksimal 2 kalimat) dan super natural!
@@ -156,6 +156,7 @@ def retrieve_with_debug(question: str) -> list[dict]:
     
     q_tokens = meaningful_tokens(question)
     print(f"🧩 [DEBUG] Token pertanyaan: {sorted(q_tokens)}")
+    print(f"{'='*50}")
     collection = get_collection()
     embedding = ollama.embeddings(model=EMBED_MODEL, prompt=question)["embedding"]
 
@@ -215,7 +216,15 @@ def retrieve_with_debug(question: str) -> list[dict]:
         )
     )
     final_chunks = candidates[:FINAL_CONTEXT_K]
+    print(f"\n{'='*50}")
     print(f"📌 [DEBUG] Total chunk terpilih untuk LLM: {len(final_chunks)}")
+    print(f"{'='*50}")
+    for chunk_index, chunk in enumerate(final_chunks, 1):
+        normalized_document = " ".join(chunk["document"].split())
+        chunk_preview = normalized_document[:300]
+        if len(normalized_document) > 300:
+            chunk_preview += "..."
+        print(f"   [CHUNK {chunk_index}] {chunk_preview}")
     print(f"{'='*50}\n")
     
     return final_chunks
@@ -227,8 +236,7 @@ def retrieve_with_debug(question: str) -> list[dict]:
 SYSTEM_PROMPT = """Kamu adalah asisten akademik yang menjawab pertanyaan tentang PMB, KRS, Jadwal dan Biaya. Gaya bicaramu Generasi Z, ramah, dan ceria.
 
 CONTEXT di bawah ini SUDAH DIPASTIKAN BERISI DATA PANDUAN YANG RELEVAN dengan pertanyaan.
-SEBELUM menjawab, BACA dan PAHAMI seluruh CONTEXT dan PERTANYAAN dengan seksama.
-Apabila TIDAK ADA INFORMASI YANG RELEVAN di dalam CONTEXT, JANGAN MENGARANG, JAWAB dengan: "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!".
+JIKA BENAR-BENAR TIDAK ADA INFORMASI pada CONTEXT yang di berikan, JANGAN MENGARANG, JAWAB dengan: "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!".
 
 ATURAN JAWABAN:
 - JAWAB pertanyaan pengguna HANYA berdasarkan informasi faktual yang tertulis di dalam CONTEXT tersebut.
@@ -237,8 +245,9 @@ ATURAN JAWABAN:
 - JIKA bertanya tentang "Pengisian KRS", SEBUTKAN SEMUA langkah pengisian KRS yang ada di CONTEXT, jangan ada yang terlewat.
 
 ATURAN WAJIB UNTUK SEMUA JAWABAN:
-- HARUS menggunakan kata "kak" atau "kakak"! DILARANG menggunakan kata "Kamu".
+- HARUS menggunakan kata "kak" atau "kakak"!.
 - Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
+- LANGSUNG jawab inti pertanyaan. JANGAN membuka jawaban dengan kalimat seperti "informasi ini ada di panduan kami" atau "informasi yang kakak tanyakan ada di panduan kami".
 - JANGAN PERNAH menyebutkan kata teknis seperti "context", "metadata", "chunk", atau "RAG".
 - JANGAN menyebut nomor bagian internal seperti "CHUNK 1", "CHUNK 5", atau "CHUNK 6". Langsung sebutkan informasi dan tanggalnya.
 - JANGAN menyebut nama dokumen, seperti: "informasi ini ada di dokumen BIAYA".
@@ -290,7 +299,7 @@ def answer_with_context(question: str, chunks: list[dict]) -> str:
     return chat_with_model(
         SYSTEM_PROMPT,
         f"CONTEXT:\n{context}\n\nPERTANYAAN:\n{question}",
-        temperature=0.2,
+        temperature=0.4,
     )
 
 
