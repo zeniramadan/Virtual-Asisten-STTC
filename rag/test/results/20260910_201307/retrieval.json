@@ -1,0 +1,448 @@
+{
+  "timestamp": "2026-09-10T20:13:15.282831",
+  "k": 3,
+  "n_cases": 42,
+  "hit_rate": 1.0,
+  "precision_at_k_avg": 0.9325,
+  "cases": [
+    {
+      "query": "syarat pendaftaran mahasiswa baru apa aja",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB",
+        "PMB",
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "kalo mau daftar sttc perlu siapin apa aja",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "dokumen yang harus discan buat daftar kuliah apa aja",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 0.5
+    },
+    {
+      "query": "link atau formulir pendaftaran online dimana",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB",
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "jurusan apa saja yang ada di kampus",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "ada ukm apa aja di kampus",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "ada beasiswa gak buat mahasiswa baru",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB",
+        "PMB",
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "beasiswa kip-k dapat fasilitas apa aja",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB",
+        "PMB",
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "ukt 50% dapat potongan biaya semester berapa persen",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB",
+        "BIAYA",
+        "BIAYA"
+      ],
+      "hit": true,
+      "precision_at_k": 0.333
+    },
+    {
+      "query": "stt cipasung didirikan tahun berapa dan di bawah supervisi siapa",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB",
+        "PMB",
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "alamat kampus dimana",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB",
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "nomor telepon sama email kampus apa",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB",
+        "PMB",
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "prospek kerja lulusan informatika apa aja",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB",
+        "PMB",
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "prospek kerja lulusan teknik industri kemana aja",
+      "expected_title": "PMB",
+      "top_k_titles": [
+        "PMB",
+        "PMB",
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "cara mengisi krs",
+      "expected_title": "KRS",
+      "top_k_titles": [
+        "KRS",
+        "KRS",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "gimana cara login ke sistem krs online",
+      "expected_title": "KRS",
+      "top_k_titles": [
+        "KRS",
+        "KRS",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "username sama password buat login krs apa",
+      "expected_title": "KRS",
+      "top_k_titles": [
+        "KRS",
+        "KRS",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "syarat perwalian online",
+      "expected_title": "KRS",
+      "top_k_titles": [
+        "KRS",
+        "KRS",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "prosedur pengisian rencana studi gimana",
+      "expected_title": "KRS",
+      "top_k_titles": [
+        "KRS",
+        "KRS",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "maksimal sks yang boleh diambil berapa",
+      "expected_title": "KRS",
+      "top_k_titles": [
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "kalau ipk di bawah 3 boleh ambil mata kuliah bebas gak",
+      "expected_title": "KRS",
+      "top_k_titles": [
+        "KRS",
+        "KRS",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "cara cetak krs gimana",
+      "expected_title": "KRS",
+      "top_k_titles": [
+        "KRS",
+        "KRS",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "apa itu perwalian",
+      "expected_title": "KRS",
+      "top_k_titles": [
+        "KRS",
+        "KRS",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "kalau gak perwalian terus gak krs-an statusnya jadi apa",
+      "expected_title": "KRS",
+      "top_k_titles": [
+        "KRS",
+        "KRS",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "biaya kuliah berapa",
+      "expected_title": "BIAYA",
+      "top_k_titles": [
+        "BIAYA",
+        "BIAYA",
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 0.667
+    },
+    {
+      "query": "ukt per semester berapa",
+      "expected_title": "BIAYA",
+      "top_k_titles": [
+        "BIAYA",
+        "BIAYA"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "biaya pendaftaran berapa",
+      "expected_title": "BIAYA",
+      "top_k_titles": [
+        "BIAYA",
+        "PMB",
+        "BIAYA"
+      ],
+      "hit": true,
+      "precision_at_k": 0.667
+    },
+    {
+      "query": "biaya awal masuk kuliah ada apa aja",
+      "expected_title": "BIAYA",
+      "top_k_titles": [
+        "BIAYA",
+        "BIAYA",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 0.667
+    },
+    {
+      "query": "bayar ukt bisa dicicil gak",
+      "expected_title": "BIAYA",
+      "top_k_titles": [
+        "BIAYA",
+        "BIAYA"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "total biaya kuliah sampai lulus berapa",
+      "expected_title": "BIAYA",
+      "top_k_titles": [
+        "BIAYA",
+        "BIAYA",
+        "PMB"
+      ],
+      "hit": true,
+      "precision_at_k": 0.667
+    },
+    {
+      "query": "biaya sidang ta berapa",
+      "expected_title": "BIAYA",
+      "top_k_titles": [
+        "BIAYA",
+        "BIAYA"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "semester 7 ada biaya tambahan apa",
+      "expected_title": "BIAYA",
+      "top_k_titles": [
+        "BIAYA",
+        "BIAYA",
+        "KRS"
+      ],
+      "hit": true,
+      "precision_at_k": 0.667
+    },
+    {
+      "query": "kapan pmb gelombang 1 dibuka",
+      "expected_title": "KALENDER",
+      "top_k_titles": [
+        "KALENDER"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "pendaftaran gelombang 3 mulai kapan",
+      "expected_title": "KALENDER",
+      "top_k_titles": [
+        "KALENDER"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "jadwal uts kapan",
+      "expected_title": "KALENDER",
+      "top_k_titles": [
+        "KALENDER",
+        "KALENDER",
+        "KALENDER"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "jadwal uas kapan",
+      "expected_title": "KALENDER",
+      "top_k_titles": [
+        "KALENDER",
+        "KALENDER",
+        "KALENDER"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "kapan pengumuman hasil seleksi gelombang 2",
+      "expected_title": "KALENDER",
+      "top_k_titles": [
+        "KALENDER"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "kapan wisuda",
+      "expected_title": "KALENDER",
+      "top_k_titles": [
+        "KALENDER",
+        "KALENDER",
+        "KALENDER"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "jadwal herregistrasi kapan",
+      "expected_title": "KALENDER",
+      "top_k_titles": [
+        "KALENDER",
+        "KALENDER",
+        "KALENDER"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "ktmb dilaksanakan tanggal berapa",
+      "expected_title": "KALENDER",
+      "top_k_titles": [
+        "KALENDER",
+        "KALENDER"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "batas waktu cuti kuliah atau kprs kapan",
+      "expected_title": "KALENDER",
+      "top_k_titles": [
+        "KALENDER",
+        "KALENDER"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    },
+    {
+      "query": "libur natal kapan",
+      "expected_title": "KALENDER",
+      "top_k_titles": [
+        "KALENDER",
+        "KALENDER"
+      ],
+      "hit": true,
+      "precision_at_k": 1.0
+    }
+  ]
+}
