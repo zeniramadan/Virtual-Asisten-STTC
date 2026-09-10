@@ -7,14 +7,39 @@ tags:
   - akademik
   - biaya-kuliah
   - biaya-pendaftaran
+  - biaya-awal
   - ukt
+  - uang-kuliah-tunggal
   - pembayaran
   - cicilan
   - biaya-semester
+  - biaya-per-semester
+  - semester-1
+  - semester-2
+  - semester-3
+  - semester-4
+  - semester-5
+  - semester-6
+  - semester-7
+  - semester-8
+  - biaya-sidang
+  - biaya-sidang-kp
+  - biaya-sidang-ta
+  - biaya-kp
+  - biaya-ta
+  - biaya-wisuda
+  - total-biaya-kuliah
+  - rincian-biaya
+  - jas-almamater
+  - kartu-tanda-mahasiswa
+  - ktm
+  - uang-bangunan
+  - orientasi-kampus
+  - berapa-biaya-kuliah
 ---
 ## Rincian Biaya Kuliah Stt Cipasung
 
-#stt-cipasung #akademik #biaya-kuliah #ukt #pembayaran #biaya-semester #biaya-awal #biaya-sidang #biaya-ta #biaya-kp #biaya-pendaftaran
+#stt-cipasung #akademik #biaya-kuliah #ukt #uang-kuliah-tunggal #pembayaran #biaya-semester #biaya-per-semester #biaya-awal #biaya-sidang #biaya-sidang-kp #biaya-sidang-ta #biaya-ta #biaya-kp #biaya-pendaftaran #biaya-wisuda #cicilan #jas-almamater #kartu-tanda-mahasiswa #ktm #uang-bangunan #orientasi-kampus #total-biaya-kuliah #rincian-biaya #semester-1 #semester-2 #semester-3 #semester-4 #semester-5 #semester-6 #semester-7 #semester-8
 
 | Biaya              | Keterangan                                                                                                                                  | Jumlah (Rp) |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |

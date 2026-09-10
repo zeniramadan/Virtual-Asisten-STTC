@@ -7,17 +7,53 @@ tags:
   - pmb
   - pendaftaran-mahasiswa-baru
   - persyaratan-pendaftaran
+  - syarat-pendaftaran
+  - formulir-pendaftaran
+  - ijazah
+  - skl
+  - ktp
+  - pas-foto
+  - kartu-keluarga
+  - akta-lahir
   - program-studi
   - teknik-industri
   - informatika
+  - kurikulum
+  - prospek-kerja
+  - prospek-kerja-ti
+  - prospek-kerja-informatika
+  - software-developer
+  - sejarah-kampus
+  - itb
+  - pesantren
   - ukm
+  - proclub
+  - kelapa
+  - sanggar-terasi
+  - kdd
+  - dignity
+  - pencak-silat
+  - kerjasama-industri
+  - jejaring
   - beasiswa
+  - kip-k
+  - ukt-100
+  - ukt-75
+  - ukt-50
+  - jenis-beasiswa
+  - fasilitas-beasiswa
   - profil-kampus
   - kontak-kampus
+  - alamat-kampus
+  - telepon-kampus
+  - email-kampus
+  - website-kampus
+  - link-pendaftaran
+  - motto
 ---
 ## Persyaratan Administrasi Pendaftaran
 
-#stt-cipasung #pmb #pendaftaran-mahasiswa-baru #persyaratan-pendaftaran #dokumen-pendaftaran #cara-masuk #daftar  #mau
+#stt-cipasung #pmb #pendaftaran-mahasiswa-baru #persyaratan-pendaftaran #dokumen-pendaftaran #cara-masuk #daftar  #mau #formulir-pendaftaran #biaya-pendaftaran #ijazah #skl #ktp #pas-foto #kartu-keluarga #akta-lahir
 
 - Mengisi formulir pendaftaran - Online: s.id/pmbsttc
 - Membayar biaya pendaftaran
@@ -32,11 +68,11 @@ tags:
 #program-studi #teknik-industri #informatika #jurusan #jurusan-apa
 
 - S1 INFORMATIKA
-- S1 INFORMATIKA
+- S1 TEKNIK INDUSTRI
 
 ## Sekilas Tentang Stt Cipasung
 
-#stt-cipasung #profil-kampus #sejarah-kampus #itb #tentang-kampus
+#stt-cipasung #profil-kampus #sejarah-kampus #itb #tentang-kampus #pesantren #tahun-berdiri #1997
 
 Didirikan pada tahun 1997 di bawah supervisi Institut Teknologi Bandung (ITB), STT Cipasung hadir untuk menjawab kebutuhan akan tenaga ahli teknik yang profesional. Kehadirannya merupakan respons strategis dalam mendukung kemajuan industri serta kebutuhan masyarakat luas. Berbasis lingkungan pesantren, STT Cipasung memadukan ilmu pengetahuan dengan nilai-nilai keislaman. Tujuannya adalah mencetak lulusan yang tidak hanya unggul secara intelektual, tetapi juga berakhlak mulia. Demi mencetak SDM berkualitas, kini STT Cipasung fokus pada program studi Teknik Industri dan Informatika. Keduanya dirancang untuk melahirkan tenaga profesional yang kompeten dan siap bersaing di dunia kerja.
 
@@ -48,7 +84,7 @@ Program Studi Teknik Industri mempelajari pengetahuan, pendekatan, pola pikir, p
 
 ### Prospek Kerja Lulusan Industri
 
-#prospek-kerja #teknik-industri #karier
+#prospek-kerja #prospek-kerja-ti #teknik-industri #karier
 
 Prospek kerja Lulusan Teknik Industri sangat luas beberapa diantaranya: bidang produksi, operasi dan penjaminan mutu, bidang sistem informasi, bidang pemasaran, bidang logistik, bidang manajemen sumber daya manusia, bidang keuangan (perbankan dan asuransi), bidang konsultasi manajemen, dsb.
 
@@ -60,13 +96,13 @@ Program Studi Informatika mempelajari dan menerapkan prinsip-prinsip ilmu komput
 
 ### Prospek Kerja Lulusan Informatika
 
-#prospek-kerja #informatika #karier
+#prospek-kerja #prospek-kerja-informatika #informatika #karier #software-developer
 
 Di era digital ini, Informatika menjadi bidang yang paling banyak dibutuhkan di dunia kerja. Lapangan pekerjaan yang bisa diisi oleh lulusan informatika adalah software developer, konsultan IT, web Engineer, perekayasa jaringan komputer, programmer dan game developer. Lulusan informatika juga dapat bekerja di sektor pendidikan dan menjadi peneliti di lembaga penelitian.
 
 ## Kemahasiswaan
 
-#kemahasiswaan #ukm #organisasi-mahasiswa #kegiatan-ekstrakurikuler
+#kemahasiswaan #ukm #organisasi-mahasiswa #kegiatan-ekstrakurikuler #proclub #kelapa #sanggar-terasi #kdd #dignity #pencak-silat
 
 Untuk memfasilitasi minat dan bakat mahasiswa, STT Cipasung menyediakan berbagai Unit Kegiatan Mahasiswa (UKM). Aktivitas Ekstrakurikuler seperti ini sangat bermanfaat untuk melatih softskill dan membangun jejaring bagi mahasiswa. UKM yang saat ini ada di STT Cipasung adalah:
 
@@ -88,7 +124,7 @@ Dalam upaya menjaga kualitas lulusan, STT Cipasung telah dan akan terus melakuka
 
 ## Hubungi Kami / Kontak / Alamat Stt Cipasung
 
-#kontak-kampus #alamat-kampus #pendaftaran-online #informasi-kampus
+#kontak-kampus #alamat-kampus #telepon-kampus #email-kampus #website-kampus #link-pendaftaran #motto #pendaftaran-online #informasi-kampus
 
 - Institusi: SEKOLAH TINGGI TEKNOLOGI CIPASUNG (TERAKREDITASI BAN-PT, DIKTISAINTEK BERDAMPAK)
 - Alamat: Jl. Raya Cisinga KM.1, Padakembang Tasikmalaya 46466

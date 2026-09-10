@@ -1,21 +1,20 @@
 """
 Tahap 2: Generation Quality Evaluation (Reference-free, metrik Faithfulness)
-Mengukur sejauh mana jawaban model berakar pada CONTEXT yang ditarik retrieval,
-bukan dibandingkan dengan kunci jawaban manusia.
+Untuk obsidian_rag.py.
 
-Jawaban tetap dihasilkan oleh sistem Minci sendiri lewat minci.ask_minci()
-(entah backend-nya Ollama atau Gemini, tergantung isi modul yang kamu import
-lewat MODULE_NAME) -- itu yang sedang diuji. Yang bertindak sebagai JUDGE
-(penilai faithfulness) memakai Gemini API secara terpisah, karena judge
-idealnya model independen di luar sistem yang diuji, bukan model yang sama
-dengan yang menghasilkan jawabannya.
+Jawaban tetap dihasilkan oleh obsidian_rag.ask() sendiri (backend Ollama
+lokal, model = obsidian_rag.CHAT_MODEL) -- itu yang sedang diuji.
+JUDGE (penilai faithfulness) memakai Gemini API secara terpisah, baca
+GEMINI_API_KEY dari environment, karena judge idealnya model independen
+di luar sistem yang diuji.
 
 Setup:
-    export GEMINI_API_KEY="xxxxx"   # sudah kamu simpan di env
+    pip install google-genai
+    export GEMINI_API_KEY="xxxxx"
 
 Cara pakai:
-    python testing/eval_faithfulness.py
-    python testing/eval_faithfulness.py --judge-model gemini-flash-latest
+    python testing_obsidian/eval_faithfulness.py
+    python testing_obsidian/eval_faithfulness.py --judge-model gemini-2.5-flash-lite
 """
 
 from __future__ import annotations
@@ -26,27 +25,28 @@ import re
 import sys
 import time
 from datetime import datetime
-from dotenv import load_dotenv
-
-dotenv_path = os.path.join(os.path.dirname(__file__), "..", "..", "webhook", ".env")
-load_dotenv(dotenv_path=dotenv_path)
 
 from google import genai
 from google.genai import types
+from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+dotenv_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+load_dotenv(dotenv_path=dotenv_path)
 
-MODULE_NAME = os.environ.get("MODULE_NAME")
-minci = __import__(MODULE_NAME)
+MODULE_NAME = os.environ.get("MODULE_NAME") # ganti kalau nama file utama kamu berbeda
+rag = __import__(MODULE_NAME)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-DEFAULT_JUDGE_MODEL = "gemini-3.5-flash-lite"  # alias resmi Google ke Gemini Flash GA terbaru
+# Nama model versi eksplisit, BUKAN alias "-latest" -- alias semacam itu
+# kadang ditolak generateContent ("unexpected model name format") atau
+# diam-diam berpindah backing model.
+DEFAULT_JUDGE_MODEL = "gemini-3.5-flash-lite"  # bisa diganti ke versi lain, mis. gemini-2.5-flash-lite
 
-# Free tier Gemini API cuma ~5 request/menit untuk model flash -- default di
-# bawah ini dibuat konservatif (satu request per ~13 detik) supaya tidak
-# terus-menerus kena 429 RESOURCE_EXHAUSTED. Kalau kamu pakai tier
-# berbayar/kuota lebih tinggi, kecilkan lewat --request-delay.
+# Free tier Gemini API cuma ~5 request/menit untuk model flash -- default
+# di bawah ini dibuat konservatif supaya tidak terus kena 429
+# RESOURCE_EXHAUSTED. Kalau pakai tier berbayar, kecilkan lewat --request-delay.
 DEFAULT_REQUEST_DELAY_SECONDS = 13
 MAX_RETRIES = 4
 
@@ -104,7 +104,7 @@ def _call_gemini_judge(prompt: str, model: str) -> str:
             if not is_rate_limit or attempt == MAX_RETRIES:
                 raise
 
-            wait = _parse_retry_delay_seconds(error_text) + 1  # +1s buffer
+            wait = _parse_retry_delay_seconds(error_text) + 1
             print(f"   ⏳ Kena rate limit (percobaan {attempt}/{MAX_RETRIES}), "
                   f"tunggu {wait:.1f}s lalu retry...")
             time.sleep(wait)
@@ -112,32 +112,26 @@ def _call_gemini_judge(prompt: str, model: str) -> str:
     raise last_exc
 
 
-def generate_with_context(question: str) -> tuple[str, str, str | None]:
+def generate_with_context(question: str) -> tuple[str, str]:
     """
-    Ambil jawaban lewat pipeline asli sistem (minci.ask_minci) -- apapun
-    backend generation-nya (Ollama atau Gemini, tergantung isi modul yang
-    di-import) -- lalu ambil context yang dipakai secara terpisah untuk
-    keperluan penilaian faithfulness. Tidak lagi meniru manggil ollama.chat
-    secara manual, supaya skrip ini tidak ikut rusak kalau backend
-    generation di modul utama diganti (mis. dari Ollama ke Gemini).
+    Ambil jawaban lewat pipeline asli obsidian_rag.ask() (tidak direplikasi
+    manual), lalu ambil context yang dipakai secara terpisah untuk keperluan
+    penilaian faithfulness.
     """
-    normalized = minci.normalize_query(question)
-    route_source, _ = minci.detect_route(normalized)
-
     try:
-        chunks = minci.retrieve(normalized, route_source=route_source)
+        chunks = rag.retrieve_with_debug(question)
     except Exception as exc:
         print(f"⚠️ retrieval error saat ambil context: {exc}")
         chunks = []
 
-    context = minci.build_context(chunks) if chunks else ""
-    answer = minci.ask_minci(question)
-    return answer, context, route_source
+    context = rag.build_context(chunks) if chunks else ""
+    answer = rag.ask(question)
+    return answer, context
 
 
 def faithfulness_score(context: str, answer: str, judge_model: str) -> tuple[float, list[dict]]:
-    if not context.strip() or answer.strip() == minci.FALLBACK_TEXT:
-        # Tidak ada context untuk dinilai (fallback) -> tidak relevan dihitung faithfulness
+    if not context.strip() or answer.strip() == rag.FALLBACK_TEXT:
+        # Tidak ada context untuk dinilai (fallback/chitchat) -> tidak relevan
         return 1.0, []
 
     prompt = JUDGE_PROMPT.format(context=context, answer=answer)
@@ -145,7 +139,13 @@ def faithfulness_score(context: str, answer: str, judge_model: str) -> tuple[flo
     try:
         raw = _call_gemini_judge(prompt, judge_model)
     except Exception as exc:
-        print(f"⚠️ Gemini API error, kasus ini dilewati: {exc}")
+        error_text = str(exc)
+        if "unexpected model name format" in error_text or "INVALID_ARGUMENT" in error_text:
+            print(f"⚠️ Nama model judge '{judge_model}' ditolak API. Coba pakai nama "
+                  f"model versi eksplisit (mis. 'gemini-2.5-flash'), bukan alias "
+                  f"'-latest'. Detail: {exc}")
+        else:
+            print(f"⚠️ Gemini API error, kasus ini dilewati: {exc}")
         return None, []
 
     raw = raw.strip().strip("`").removeprefix("json").strip()
@@ -176,10 +176,10 @@ def evaluate_faithfulness(
 
     for i, case in enumerate(cases):
         query = case["query"]
-        answer, context, route_source = generate_with_context(query)
+        answer, context = generate_with_context(query)
 
         if i > 0 and request_delay > 0:
-            time.sleep(request_delay)  # jaga-jaga biar tidak kena limit free tier
+            time.sleep(request_delay)
 
         score, claims = faithfulness_score(context, answer, judge_model)
 
@@ -188,7 +188,6 @@ def evaluate_faithfulness(
 
         per_case.append({
             "query": query,
-            "route_source": route_source,
             "answer": answer,
             "faithfulness_score": round(score, 3) if score is not None else None,
             "claims": claims,
@@ -207,14 +206,17 @@ def evaluate_faithfulness(
     }
 
     print(f"\n=== GENERATION QUALITY (Faithfulness, judge={judge_model}) ===")
-    print(f"Rata-rata Faithfulness : {result['faithfulness_avg']:.2%}" if result["faithfulness_avg"] is not None else "Tidak ada skor valid")
+    if result["faithfulness_avg"] is not None:
+        print(f"Rata-rata Faithfulness : {result['faithfulness_avg']:.2%}")
+    else:
+        print("Tidak ada skor valid")
 
     return result
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", default=os.path.join(os.path.dirname(__file__), "ground_truth.json"))
+    parser.add_argument("--dataset", default=os.path.join(os.path.dirname(__file__), "..", "..", "dataset", "ground_truth.json"))
     parser.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
     parser.add_argument("--request-delay", type=float, default=DEFAULT_REQUEST_DELAY_SECONDS,
                          help="Jeda (detik) antar-request ke Gemini, biar tidak kena rate limit free tier")

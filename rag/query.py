@@ -1,111 +1,46 @@
 """
-Pure RAG query.py untuk Minci.
-- Semua pertanyaan akademik melewati retrieval.
-- Routing memilih source ChromaDB.
-- Model SELALU dipanggil, bahkan ketika context kosong.
-- Fallback sepenuhnya di-handle oleh System Prompt Llama 3.2.
+Skrip khusus untuk Chat Interaktif & Retrieval RAG.
+Jalankan ini: python obsidian_rag.py
 """
 
 from __future__ import annotations
-import json
 import os
 import re
-from collections import Counter
+import sys
+import json
+import logging
+
+# Disable ChromaDB telemetry before importing the library.
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 import chromadb
 import ollama
 
+logging.getLogger("chromadb.telemetry.product.posthog").disabled = True
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CHROMA_DB_DIR = os.path.join(BASE_DIR, "database", "chroma_db")
-COLLECTION_NAME = "minci_dokumen"
+DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
+COLLECTION_NAME = "obsidian_vault"
 
 EMBED_MODEL = "bge-m3"
-CHAT_MODEL = "llama3.2"  # Model Llama 3.2 terbaru yang cepat & gratis
+CHAT_MODEL = "llama3.1"
 
-RETRIEVAL_K = 20
-FINAL_CONTEXT_K = 8
-MAX_DISTANCE = 0.60
-ROUTED_MAX_DISTANCE = 0.58
+RETRIEVAL_K = 15          
+FINAL_CONTEXT_K = 6       
+MAX_DISTANCE = 0.60       
+MIN_OVERLAP_IF_LONG_QUERY = 1  
 DEBUG = True
 
-# Variabel FALLBACK manual dihapus karena sekarang diserahkan ke model
-
-
 # ============================================================
-# CHROMADB
+# TEXT PROCESSING CONFIGURATION
 # ============================================================
 
-_client = chromadb.PersistentClient(
-    path=CHROMA_DB_DIR,
-    settings=chromadb.config.Settings(anonymized_telemetry=False),
-)
-
-_collection = _client.get_or_create_collection(
-    COLLECTION_NAME,
-    metadata={"hnsw:space": "cosine"},
-)
-
-if DEBUG:
-    print(
-        f"[RAG] collection={COLLECTION_NAME} | "
-        f"chunks={_collection.count()} | embedding={EMBED_MODEL} | "
-        f"chat_model={CHAT_MODEL}"
-    )
-
-
-# ============================================================
-# NORMALISASI RINGAN
-# ============================================================
-
-_NUMBER_WORDS = {
-    "nol": "0", "satu": "1", "dua": "2", "tiga": "3", "empat": "4",
-    "lima": "5", "enam": "6", "tujuh": "7", "delapan": "8",
-    "sembilan": "9", "sepuluh": "10",
+_STOPWORDS = {
+    "yang", "dan", "atau", "di", "ke", "dari", "untuk", "dengan",
+    "ini", "itu", "ada", "apa", "apakah", "bagaimana", "berapa",
+    "kapan", "dimana", "mana", "saja", "aja", "adalah", "pada", "min",
+    "nya", "sih", "siapa", "kamu", "anda", "kak", "kakak",
 }
-
-_ABBREVIATION_ALIASES = (
-    (r"\bp\s*\.?\s*m\s*\.?\s*b\s*\.?\b", "PMB penerimaan mahasiswa baru\n"),
-    (r"\bk\s*\.?\s*r\s*\.?\s\s*\.?\b", "KRS kartu rencana studi\n"),
-    (r"\bp\s*\.?\s*r\s*\.?\s*o\s*\.?\s*d\s*\.?\s*i\s*\.?\b", "PRODI program studi\n"),
-    (r"\bu\s*\.??\s*k\s*\.??\s*m\s*\.??\b", "UKM unit kegiatan mahasiswa\n"),
-    (r"\bk\s*\.??\s*p\s*\.??\s*r\s*\.??\s*s\s*\.??\b", "KPRS kartu perubahan rencana studi"),
-)
-
-_ADDRESS_TERMS = {"min", "minci", "kak", "kakak"}
-
-
-def normalize_abbreviations(text: str) -> str:
-    for pattern, replacement in _ABBREVIATION_ALIASES:
-        text = re.sub(pattern, replacement, text, flags=re.I)
-    return text
-
-
-def normalize_query(question: str) -> str:
-    q = str(question or "").strip()
-    q = re.sub(r"\s+", " ", q)
-    q = normalize_abbreviations(q)
-    q = re.sub(r"\s+", " ", q).strip()
-
-    q = " ".join(
-        word for word in q.split()
-        if word.lower().strip("!?.,") not in _ADDRESS_TERMS
-    )
-
-    q = re.sub(r"\bgelombang\s+i\b", "gelombang 1", q, flags=re.I)
-    q = re.sub(r"\bgelombang\s+ii\b", "gelombang 2", q, flags=re.I)
-    q = re.sub(r"\bgelombang\s+iii\b", "gelombang 3", q, flags=re.I)
-
-    for word, number in _NUMBER_WORDS.items():
-        q = re.sub(
-            rf"\bgelombang\s+(?:ke[- ]?)?{word}\b",
-            f"gelombang {number}",
-            q,
-            flags=re.I,
-        )
-
-    return q
-
 
 # ============================================================
 # CHITCHAT DETECTION (basa-basi → skip RAG)
@@ -151,7 +86,7 @@ def is_chitchat(question: str) -> bool:
     return False
 
 
-CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
+CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu Generasi Z, ramah, dan ceria.
 
 TUGAS UTAMA:
 Jawab sapaan, salam, ucapan terima kasih, atau obrolan ringan (chitchat) dari pengguna dengan SINGKAT (maksimal 2 kalimat) dan super natural!
@@ -163,451 +98,238 @@ ATURAN BALASAN SESUAI KONTEKS:
 4. Jika pengguna BERTANYA HAL LAIN (seperti "lagi apa?", "kamu siapa?", "mau nanya"), jawab sesuai pertanyaan ringan mereka dengan gaya santai Gen-Z, lalu arahkan kembali agar mereka bertanya tentang PMB, KRS, atau biaya.
 
 KATA KUNCI LARANGAN KERAS:
-- HARUS menggunakan kata "kak" atau "kakak" di setiap kalimat!
+- HARUS menggunakan kata "kak" atau "kakak"!
 - DILARANG KERAS menggunakan kata "Kamu" atau "Anda" saat menyapa pengguna!
 - JANGAN PERNAH memberikan jawaban template "Sama-sama" jika pengguna tidak sedang berterima kasih!
 - JANGAN mengarang atau memberikan informasi akademik palsu di sini!
 """
 
 # ============================================================
-# ROUTING
+# RETRIEVAL HELPERS
 # ============================================================
-
-ROUTES = [
-    ("BIAYA.docx", [
-        "biaya", "berapa bayar", "berapa biaya", "nominal", "harga kuliah",
-        "uang kuliah", "ukt", "pembayaran", "bayar", "cicilan", "cicil",
-        "biaya pendaftaran", "biaya registrasi",
-    ]),
-    ("KALENDER.docx", [
-        "jadwal", "tanggal", "tanggal pmb", "tanggal penerimaan", "kalender", "kapan", "gelombang",
-        "pra ktmb", "ktmb", "hasil seleksi", "pengumuman", "seleksi",
-        "perwalian", "herregistrasi", "kprs", "cuti kuliah", "uts", "uas",
-    ]),
-    ("KRS.docx", [
-        "krs", "kartu rencana studi", "pengisian krs", "isi krs", "syarat krs",
-        "mengisi krs", "cara krs", "tata cara krs", "prosedur krs", "syarat perwalian",
-        "perwalian online", "rencana studi", "mata kuliah", "perwalian",
-    ]),
-    ("PMB.docx", [
-        "pmb", "penerimaan mahasiswa baru", "mahasiswa baru",
-        "calon mahasiswa", "pendaftaran", "mendaftar", "daftar kuliah",
-        "syarat masuk", "syarat pendaftaran", "persyaratan masuk", "jalur masuk",
-        "program studi", "prodi", "jurusan", "beasiswa", "ukm",
-        "unit kegiatan mahasiswa", "profil kampus", "tentang kampus",
-        "tentang stt cipasung",
-    ]),
-]
-
-
-def _route_text(text: str) -> str:
-    text = text.lower()
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def detect_route(question: str) -> tuple[str | None, str]:
-    q = _route_text(normalize_query(question))
-
-    words = set(q.split())
-    requirement_words = {"syarat", "persyaratan", "dokumen", "berkas"}
-    krs_words = {"krs", "perwalian"}
-    registration_words = {
-        "pendaftaran", "mendaftar", "daftar", "pmb", "masuk",
-        "calon", "mahasiswa",
-    }
-
-    if words & requirement_words and words & krs_words:
-        return "KRS.docx", "prioritas syarat KRS/perwalian"
-
-    if words & requirement_words and words & registration_words:
-        return "PMB.docx", "prioritas syarat pendaftaran PMB"
-
-    # PRIORITAS KATA TANYA WAKTU: "kapan"/"tanggal"/"jadwal" HARUS menang
-    # duluan, sebelum scoring keyword biasa. Kenapa ini perlu: normalize_abbreviations()
-    # mengubah "pmb" jadi "PMB penerimaan mahasiswa baru" -- akibatnya frasa panjang
-    # ini ikut disisipkan ke teks query dan mendominasi skor Counter di bawah
-    # (bobotnya = jumlah kata di frasa, jadi "penerimaan mahasiswa baru" dapat
-    # bobot 3, sementara "kapan" cuma bobot 1). Tanpa aturan ini, pertanyaan
-    # "kapan pmb dibuka" selalu di-route paksa ke PMB.docx dan KALENDER.docx
-    # (tempat tanggal/jadwal sebenarnya disimpan) tidak pernah ikut dicari sama
-    # sekali karena routing pakai hard where-filter.
-    time_words = {"kapan", "tanggal", "jadwal"}
-    if words & time_words:
-        return "KALENDER.docx", "prioritas kata tanya waktu (kapan/tanggal/jadwal)"
-
-    scores = Counter()
-    matches = {}
-
-    for source, keywords in ROUTES:
-        for keyword in keywords:
-            k = _route_text(keyword)
-            if re.search(rf"(?<!\w){re.escape(k)}(?!\w)", q):
-                weight = max(1, len(k.split()))
-                scores[source] += weight
-                matches.setdefault(source, []).append(keyword)
-
-    if not scores:
-        return None, "tidak ada keyword routing"
-
-    ranked = scores.most_common()
-    best_source, best_score = ranked[0]
-
-    if len(ranked) == 1:
-        return best_source, f"keyword={matches[best_source]}"
-
-    second_score = ranked[1][1]
-
-    if best_score >= second_score + 2:
-        return best_source, f"keyword={matches[best_source]}"
-
-    if words & {"biaya", "bayar", "nominal", "ukt", "harga"}:
-        return "BIAYA.docx", "prioritas biaya/pembayaran"
-
-    if words & {"jadwal", "tanggal", "kapan", "kalender", "gelombang"}:
-        return "KALENDER.docx", "prioritas jadwal/tanggal"
-
-    if "krs" in words or "perwalian" in words:
-        return "KRS.docx", "prioritas KRS/perwalian"
-
-    if words & {"pmb", "pendaftaran", "prodi", "jurusan", "beasiswa"}:
-        return "PMB.docx", "prioritas PMB/pendaftaran"
-
-    return None, "routing ambigu -> retrieval global"
-
-
-# ============================================================
-# RETRIEVAL GATE
-# ============================================================
-
-_STOPWORDS = {
-    "yang", "dan", "atau", "di", "ke", "dari", "untuk", "dengan",
-    "ini", "itu", "ada", "apa", "apakah", "bagaimana", "berapa",
-    "kapan", "dimana", "mana", "saja", "aja", "dong", "deh", "sih",
-    "ya", "nih", "kak", "min", "minci", "tolong", "mohon", "bisa",
-    "gak", "nggak", "enggak", "tidak", "tau", "tahu", "stt",
-    "cipasung", "kampus", "informasi", "nya",
-}
-
-_REQUIREMENT_TERMS = {
-    "syarat", "persyaratan", "dokumen", "berkas", "ketentuan",
-}
-_PROCEDURE_TERMS = {
-    "cara", "tata cara", "langkah", "prosedur", "mengisi", "pengisian",
-}
-
 
 def meaningful_tokens(text: str) -> set[str]:
-    text = normalize_abbreviations(text)
     return {
-        x for x in re.findall(r"[a-z0-9]+", text.lower())
-        if len(x) >= 3 and x not in _STOPWORDS
+        w for w in re.findall(r"[a-z0-9]+", text.lower())
+        if len(w) >= 3 and w not in _STOPWORDS
     }
 
 
-def lexical_overlap(question: str, document: str) -> int:
-    return len(meaningful_tokens(question) & meaningful_tokens(document))
+def tag_tokens(metadata: dict) -> set[str]:
+    """Ubah metadata tags menjadi token yang bisa dibandingkan dengan query."""
+    tags = metadata.get("tags", "")
+    return meaningful_tokens(tags.replace("-", " ").replace("_", " "))
 
 
-def intent_match(question: str, document: str) -> int:
-    """Prioritaskan section dokumen yang sesuai dengan intent pertanyaan."""
-    question_text = _route_text(normalize_query(question))
-    document_text = _route_text(document)
-
-    requirement_query = bool(
-        meaningful_tokens(question_text) & _REQUIREMENT_TERMS
-    )
-    procedure_query = bool(
-        meaningful_tokens(question_text)
-        & {"cara", "langkah", "prosedur", "mengisi", "pengisian"}
-    )
-
-    score = 0
-    if requirement_query and any(
-        re.search(rf"(?<!\w){re.escape(term)}(?!\w)", document_text)
-        for term in _REQUIREMENT_TERMS
-    ):
-        score += 3
-    if procedure_query and any(
-        re.search(rf"(?<!\w){re.escape(term)}(?!\w)", document_text)
-        for term in _PROCEDURE_TERMS
-    ):
-        score += 3
-    return score
-
-
-def retrieve(question: str, route_source: str | None) -> list[dict]:
-    embedding = ollama.embeddings(
-        model=EMBED_MODEL,
-        prompt=question,
-    )["embedding"]
-
-    kwargs = {
-        "query_embeddings": [embedding],
-        "n_results": RETRIEVAL_K,
+def exact_tag_matches(question: str, metadata: dict) -> set[str]:
+    """Cari tag utuh yang muncul sebagai frasa di dalam pertanyaan."""
+    question_text = re.sub(r"[^a-z0-9\s]", " ", question.lower())
+    question_text = " ".join(question_text.split())
+    tags = {
+        tag.strip().lower()
+        for tag in metadata.get("tags", "").split(",")
+        if tag.strip()
+    }
+    return {
+        tag
+        for tag in tags
+        if f" {tag.replace('-', ' ')} " in f" {question_text} "
     }
 
-    if route_source:
-        kwargs["where"] = {"source": route_source}
 
-    results = _collection.query(**kwargs)
+def get_collection():
+    client = chromadb.PersistentClient(
+        path=DB_DIR,
+        settings=chromadb.config.Settings(anonymized_telemetry=False),
+    )
+    return client.get_or_create_collection(
+        COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
+    )
+
+# ============================================================
+# DOCUMENT RETRIEVAL
+# ============================================================
+
+def retrieve_with_debug(question: str) -> list[dict]:
+    print(f"\n{'='*50}")
+    print(f"🔍 [DEBUG] Pertanyaan: \"{question}\"")
+    
+    q_tokens = meaningful_tokens(question)
+    print(f"🧩 [DEBUG] Token pertanyaan: {sorted(q_tokens)}")
+    collection = get_collection()
+    embedding = ollama.embeddings(model=EMBED_MODEL, prompt=question)["embedding"]
+
+    results = collection.query(query_embeddings=[embedding], n_results=RETRIEVAL_K)
 
     documents = results.get("documents", [[]])[0]
     metadatas = results.get("metadatas", [[]])[0]
     distances = results.get("distances", [[]])[0]
-    ids = results.get("ids", [[]])[0]
 
-    if not documents:
-        return []
-
-    threshold = ROUTED_MAX_DISTANCE if route_source else MAX_DISTANCE
-    q_tokens = meaningful_tokens(question)
     candidates = []
-
-    for doc_id, document, metadata, distance in zip(
-        ids, documents, metadatas, distances
-    ):
-        if not document:
-            continue
-
+    for idx, (document, metadata, distance) in enumerate(zip(documents, metadatas, distances)):
         distance = float(distance)
-        overlap = lexical_overlap(question, document)
-        intent = intent_match(question, document)
+        document_tokens = meaningful_tokens(document)
+        metadata_tags = tag_tokens(metadata or {})
+        document_overlap = sorted(q_tokens & document_tokens)
+        tag_overlap_tokens = sorted(q_tokens & metadata_tags)
+        overlap = len(document_overlap)
+        tag_overlap = len(tag_overlap_tokens)
+        exact_tags = exact_tag_matches(question, metadata or {})
+        
+        passed_distance = distance <= MAX_DISTANCE
+        passed_overlap = (len(q_tokens) < 2) or (overlap >= MIN_OVERLAP_IF_LONG_QUERY)
+        is_valid = passed_distance and passed_overlap
 
-        if distance > threshold:
-            continue
+        status = "✅ LOLOS" if is_valid else "❌ DIBUANG"
+        title = metadata.get('title', '?')
+        print(
+            f"   [{idx+1}] Note: {title} | Jarak: {distance:.4f} | "
+            f"Overlap: {overlap} | Tag overlap: {tag_overlap} | Status: {status}"
+        )
+        print(f"       Kata isi yang cocok: {document_overlap or '-'}")
+        print(f"       Kata tag yang cocok: {tag_overlap_tokens or '-'}")
+        print(f"       Exact tag: {sorted(exact_tags) or '-'}")
 
-        # Route sudah membatasi dokumen ke sumber yang relevan. Jangan buang
-        # chunk teratas hanya karena bentuk katanya berbeda, misalnya
-        # "syarat" vs "persyaratan" atau "daftar" vs "pendaftaran".
-        if route_source is None and len(q_tokens) >= 2 and overlap < 1:
+        if not is_valid:
             continue
 
         candidates.append({
-            "id": doc_id,
             "document": document,
-            "metadata": metadata or {},
+            "metadata": metadata,
             "distance": distance,
             "overlap": overlap,
-            "intent": intent,
+            "tag_overlap": tag_overlap,
+            "exact_tags": exact_tags,
         })
 
-    candidates.sort(key=lambda x: (-x["intent"], x["distance"], -x["overlap"]))
+    exact_tag_candidates = [candidate for candidate in candidates if candidate["exact_tags"]]
+    if exact_tag_candidates:
+        candidates = exact_tag_candidates
 
-    return candidates[:FINAL_CONTEXT_K]
-
-
-# ============================================================
-# CONTEXT
-# ============================================================
-
-def build_context(chunks: list[dict]) -> str:
-    # Jika tidak ada chunk (kosong), kembalikan string yang memberi tahu model
-    if not chunks:
-        return "TIDAK ADA DATA PANDUAN YANG DITEMUKAN."
-        
-    parts = []
-    for i, chunk in enumerate(chunks, 1):
-        source = chunk["metadata"].get("source", "dokumen")
-        parts.append(
-            f"CHUNK {i}\n"
-            f"Sumber internal: {source}\n"
-            f"Isi:\n{chunk['document'].strip()}"
+    candidates.sort(
+        key=lambda c: (
+            -len(c["exact_tags"]),
+            c["distance"],
+            -c["tag_overlap"],
+            -c["overlap"],
         )
-
-    return "\n\n---\n\n".join(parts)
-
+    )
+    final_chunks = candidates[:FINAL_CONTEXT_K]
+    print(f"📌 [DEBUG] Total chunk terpilih untuk LLM: {len(final_chunks)}")
+    print(f"{'='*50}\n")
+    
+    return final_chunks
 
 # ============================================================
-# LLM PROMPT
+# LLM PROMPTS
 # ============================================================
 
-SYSTEM_PROMPT = """Kamu adalah Minci, Asisten Virtual Akademik STT Cipasung. Gaya bicaramu santai, ramah, ceria ala Generasi Z, tapi tetap sopan.
+SYSTEM_PROMPT = """Kamu adalah asisten akademik yang menjawab pertanyaan tentang PMB, KRS, Jadwal dan Biaya. Gaya bicaramu Generasi Z, ramah, dan ceria.
 
-PENTING: Cek isi teks CONTEXT terlebih dahulu sebelum melihat PERTANYAAN!
+CONTEXT di bawah ini SUDAH DIPASTIKAN BERISI DATA PANDUAN YANG RELEVAN dengan pertanyaan.
+SEBELUM menjawab, BACA dan PAHAMI seluruh CONTEXT dan PERTANYAAN dengan seksama.
+Apabila TIDAK ADA INFORMASI YANG RELEVAN di dalam CONTEXT, JANGAN MENGARANG, JAWAB dengan: "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!".
 
-KONDISI 1 - JIKA CONTEXT BERISI TULISAN "TIDAK ADA DATA PANDUAN YANG DITEMUKAN.":
-- Kamu WAJIB dan HANYA BOLEH menjawab dengan kalimat persis seperti ini: "Maaf kak, informasi yang kamu tanyakan tidak ada di panduan kami. Silakan hubungi bagian Tata Usaha ya!"
-- DILARANG KERAS mengarang, menebak, atau menggunakan pengetahuan umummu untuk menjawab pertanyaan akademik seputar kampus jika context kosong!
-
-KONDISI 2 - JIKA CONTEXT BERISI DATA PANDUAN AKTIF:
-- Jawab pertanyaan pengguna HANYA berdasarkan informasi faktual yang tertulis di dalam CONTEXT tersebut.
-- Jika pertanyaan meminta "syarat", berikan DAFTAR SYARAT saja dari context. Jangan jelaskan tata cara.
-- Jika pertanyaan meminta "cara", berikan LANGKAH-LANGKAH saja dari context. Jangan berikan daftar syarat.
-- JIKA pertanyaan meminta "syarat" atau "persyaratan", kamu WAJIB DAN HARUS MENULISKAN SEMUA DAFTAR SYARAT YANG ADA DI CONTEXT SECARA LENGKAP! 
-- Jika pertanyaan tidak spesifik mengenai jadwal PMB, cantumkan tanggal pendaftaran gelombang 1, 2, dan 3 yang tertera di context.
-_ Jika pertanyaan meminta "seleksi" berikan jadwal seleksi penerimaan mahasiswa baru yang ada di context.
-
-KONDISI 3 - JIKA PERTANYAAN ADALAH PERTANYAAN UMUM DI LUAR URUSAN KAMPUS (Contoh: matematika, sejarah, coding, AI):
-- ABAIKAN CONTEXT dan jawablah dengan pengetahuan umummu secara cerdas dan santai.
+ATURAN JAWABAN:
+- JAWAB pertanyaan pengguna HANYA berdasarkan informasi faktual yang tertulis di dalam CONTEXT tersebut.
+- JIKA bertanya tentang "daftar", "pendaftaran", JAWAB dengan SYARAT PENDAFTARAN.
+- JIKA data dari CONTEXT berupa daftar, TAMPILKAN dalam bentuk daftar bullet (-) agar mudah dibaca.
+- JIKA bertanya tentang "Pengisian KRS", SEBUTKAN SEMUA langkah pengisian KRS yang ada di CONTEXT, jangan ada yang terlewat.
 
 ATURAN WAJIB UNTUK SEMUA JAWABAN:
-- HARUS menggunakan kata "kak" atau "kakak" di SETIAP kalimat! DILARANG menggunakan kata "Kamu".
+- HARUS menggunakan kata "kak" atau "kakak"! DILARANG menggunakan kata "Kamu".
 - Gunakan bullet "-" untuk menampilkan data yang berbentuk daftar.
 - JANGAN PERNAH menyebutkan kata teknis seperti "context", "metadata", "chunk", atau "RAG".
 - JANGAN menyebut nomor bagian internal seperti "CHUNK 1", "CHUNK 5", atau "CHUNK 6". Langsung sebutkan informasi dan tanggalnya.
+- JANGAN menyebut nama dokumen, seperti: "informasi ini ada di dokumen BIAYA".
+- JANGAN menyebut tempat informasi berada, seperti "informasi ini ada di tabel biaya".
 """
 
-def build_user_prompt(question: str, context: str) -> str:
-    return f"""CONTEXT:
-{context}
-
-PERTANYAAN:
-{question}
-
-Jawab langsung pertanyaan tersebut.
-"""
-
-
 # ============================================================
-# CLEANING MINIMAL
+# CONTEXT AND CHAT API
 # ============================================================
 
-def clean_output(text: str) -> str:
-    text = str(text or "").strip()
+FALLBACK_TEXT = (
+    "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, "
+    "coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!"
+)
 
-    text = re.sub(
-        r"\s+(?:di|pada|dalam)\s+(?:CHUNK\s+\d+\s*(?:,|dan)?\s*)+",
-        " ",
-        text,
-        flags=re.I,
+
+def build_context(chunks: list[dict]) -> str:
+    parts = []
+    for c in chunks:
+        title = c["metadata"].get("title", "?")
+        path = c["metadata"].get("path", "?")
+        parts.append(f"[Note: {title} ({path})]\n{c['document']}")
+    return "\n\n---\n\n".join(parts)
+
+
+def chat_with_model(system_prompt: str, user_prompt: str, **options) -> str:
+    response = ollama.chat(
+        model=CHAT_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        options=options,
     )
-    text = re.sub(r"\bCHUNK\s+\d+\b", "", text, flags=re.I)
-    text = re.sub(r"\s+([,:;.!?])", r"\1", text)
-    text = re.sub(r"[ \t]{2,}", " ", text)
+    return response.get("message", {}).get("content", "").strip()
 
-    text = re.sub(
-        r"\[(?:Sumber|Konteks|Bagian|Sumber internal):[^\]]*\]\s*",
-        "",
-        text,
-        flags=re.I,
+
+def answer_chitchat(question: str) -> str:
+    return chat_with_model(
+        CHITCHAT_SYSTEM_PROMPT,
+        question,
+        temperature=0.4,
+        num_predict=100,
     )
 
-    for filename in ("PMB.docx", "KRS.docx", "BIAYA.docx", "KALENDER.docx"):
-        text = text.replace(filename, "")
-        
-    # 3. Ubah semua bullet poin fisik (• atau *) menjadi "-" tanpa merusak teks
-    text = text.replace("•", "-")
-    text = text.replace("▪", "-")
-    text = text.replace("⁃", "-")
-    
-    return text.strip()
 
-# ============================================================
-# API UTAMA
-# ============================================================
-
-def ask_minci(question: str) -> str:
-    """
-    Pure RAG:
-        query -> routing -> retrieval -> gate -> context -> model
-
-    Model SELALU dipanggil untuk menghasilkan jawaban.
-    """
-    question = normalize_query(question)
-
-    # Tetap sediakan fallback error ringan jika pertanyaan benar-benar kosong
-    if not question:
-        return "Ada yang bisa Minci bantu, kak?"
-
-       # --- Chitchat bypass: basa-basi langsung ke model TANPA RAG ---
-    if is_chitchat(question):
-        if DEBUG:
-            print(f"\n[CHITCHAT] '{question}' terdeteksi basa-basi -> skip RAG")
-        try:
-            response = ollama.chat(
-                model=CHAT_MODEL,
-                messages=[
-                    {"role": "system", "content": CHITCHAT_SYSTEM_PROMPT},
-                    {"role": "user", "content": question},
-                ],
-                options={
-                    "temperature": 0.4,     # Naik sedikit ke 0.4 agar gaya Gen-Z nya lebih natural & tidak kaku
-                    "top_p": 0.9,           # Membatasi pilihan kata agar tetap masuk akal
-                    "num_predict": 100,     # Batasan respons chitchat pendek (maksimal ~100 token)
-                },
-            )
-            return clean_output(response.get("message", {}).get("content", ""))
-        except Exception as exc:
-            if DEBUG: print(f"[LLM] chitchat error: {exc}")
-            return "Halo kak! Ada yang bisa Minci bantu?"
-
-
-    if _collection.count() == 0:
-        if DEBUG: print("[RAG] collection kosong")
-        # Biarkan model merespons dengan context kosong
-
-    route_source, route_reason = detect_route(question)
-
-    if DEBUG:
-        print("\n" + "=" * 70)
-        print(f"[QUERY] {question}")
-        print(f"[ROUTE] {route_source or 'GLOBAL'}")
-        print(f"[WHY]   {route_reason}")
-        print("=" * 70)
-
-    try:
-        chunks = retrieve(question, route_source=route_source)
-    except Exception as exc:
-        if DEBUG: print(f"[RAG] retrieval error: {exc}")
-        chunks = []
-
-    # Blok 'if not chunks' manual dihapus, sehingga konteks kosong tetap dikirim ke model
+def answer_with_context(question: str, chunks: list[dict]) -> str:
     context = build_context(chunks)
-
-    if DEBUG:
-        print("\n" + "=" * 70)
-        print("[CONTEXT YANG DIKIRIM KE MODEL]")
-        print("=" * 70)
-        print(context)
-        print("=" * 70)
-
-    try:
-        # PENTING: Gunakan format ini agar Ollama menyuntikkan template chat Llama 3.2 secara benar
-        response = ollama.chat(
-            model=CHAT_MODEL,
-            messages=[
-                {
-                    "role": "system", 
-                    "content": SYSTEM_PROMPT
-                },
-                {
-                    "role": "user", 
-                    "content": build_user_prompt(question, context)
-                },
-            ],
-            options={
-                "temperature": 0.1,    # Sudah benar (rendah agar konsisten)
-                "num_predict": 1024,
-                # Tambahkan parameter di bawah ini jika model masih suka tidak patuh:
-                # "top_p": 0.9,
-            },
-        )
-    except Exception as exc:
-        if DEBUG: print(f"[LLM] error: {exc}")
-        return "Maaf kak, sistem Minci sedang gangguan. Coba lagi nanti ya!"
+    return chat_with_model(
+        SYSTEM_PROMPT,
+        f"CONTEXT:\n{context}\n\nPERTANYAAN:\n{question}",
+        temperature=0.2,
+    )
 
 
-    raw_answer = response.get("message", {}).get("content", "")
-    answer = clean_output(raw_answer)
+def ask(question: str) -> str:
+    if is_chitchat(question):
+        return answer_chitchat(question)
 
-    return answer
+    chunks = retrieve_with_debug(question)
 
+    if not chunks:
+        return FALLBACK_TEXT
+
+    return answer_with_context(question, chunks)
 
 # ============================================================
-# TEST TERMINAL
+# INTERACTIVE TERMINAL MODE
 # ============================================================
 
-if __name__ == "__main__":
-    print("\nMinci - Asisten Virtual Akademik STT Cipasung")
-    print("Ketik 'exit' untuk keluar.\n")
+def run_terminal_chat() -> None:
+    print("\n" + "="*50)
+    print("🤖 Minci Siap!")
+    print("Ketik 'exit' atau 'quit' untuk keluar.")
+    print("="*50 + "\n")
 
     while True:
-        q = input("Kamu: ").strip()
-
-        if q.lower() in {"exit", "quit"}:
+        try:
+            question = input("Kamu: ").strip()
+            if question.lower() in {"exit", "quit"}:
+                break
+            if not question:
+                continue
+            
+            print("Minci sedang menganalisis catatan...")
+            answer = ask(question)
+            print(f"Kamu: {question}")
+            print(f"Minci: {answer}\n")
+        except KeyboardInterrupt:
             break
 
-        answer = ask_minci(q)
-        print(f"\nKamu: {q}")
-        print(f"Minci: {answer}\n")
+
+if __name__ == "__main__":
+    run_terminal_chat()

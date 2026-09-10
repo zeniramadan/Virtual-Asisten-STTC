@@ -11,12 +11,32 @@ tags:
   - registrasi
   - herregistrasi
   - panduan-krs
+  - cara-isi-krs
+  - login-krs
+  - nim
+  - password
+  - tanggal-lahir
+  - bagian-keuangan
+  - tata-usaha
+  - konfirmasi-pembayaran
+  - dosen-wali
+  - dosen-pembimbing-akademik
+  - cetak-krs
+  - laporan-krs
+  - sevima
+  - mata-kuliah
+  - mata-kuliah-paket
+  - batas-sks
   - sks
   - ipk
+  - mahasiswa-tidak-aktif
+  - mengundurkan-diri
+  - definisi-krs
+  - syarat-krs
 ---
 ## Panduan/Tata Cara/Cara Pengisian Kartu Rencana Studi (Krs)/Perwalian Online Untuk Mahasiswa
 
-#stt-cipasung #krs #kartu-rencana-studi #perwalian #panduan-krs #cara #cara-isi #cara-mengisi #cara-ngisi
+#stt-cipasung #krs #kartu-rencana-studi #perwalian #panduan-krs #cara #cara-isi #cara-mengisi #cara-ngisi #login-krs #nim #password #tanggal-lahir #bagian-keuangan #tata-usaha #konfirmasi-pembayaran #cetak-krs #laporan-krs
 
 - Pastikan jaringan internet Anda stabil dan telah melakukan konfirmasi tagihan pembayaran ke Bagian Keuangan di kantor Tata Usaha.
 - Setelah terhubung dengan jaringan internet kampus, silahkan Anda masuk ke halaman http://31.58.158.149:8060/. Kemudian akan muncul tampilan sebagai berikut: (tampilan visual antarmuka login)
@@ -33,13 +53,13 @@ tags:
 
 ## Tujuan Krs/Perwalian
 
-#krs #perwalian #registrasi #herregistrasi
+#krs #perwalian #registrasi #herregistrasi #tujuan-krs
 
 Memastikan pelaksanaan registrasi dan herregistrasi mahasiswa berjalan secara efektif dan efisien sesuai dengan ketentuan dan peraturan yang berlaku serta memenuhi persyaratan yang telah ditetapkan.
 
 ## Definisi Krs/Perwalian
 
-#krs #perwalian #registrasi #herregistrasi
+#krs #perwalian #registrasi #herregistrasi #apa #pengertian #definisi-krs #dosen-wali #dosen-pembimbing-akademik
 
 - Registrasi Mahasiswa adalah proses pendaftaran mahasiswa untuk memperoleh atau menetapkan status sebagai mahasiswa sesuai dengan ketentuan yang berlaku.
 - Herregistrasi Mahasiswa adalah proses pendaftaran ulang mahasiswa untuk mempertahankan atau mengaktifkan status sebagai mahasiswa dan melanjutkan kegiatan akademik pada semester berikutnya sesuai dengan ketentuan yang berlaku.
@@ -48,7 +68,7 @@ Memastikan pelaksanaan registrasi dan herregistrasi mahasiswa berjalan secara ef
 
 ## Syarat Dan Ketentuan Krs/Perwalian
 
-#krs #perwalian #sks #ipk #administrasi-keuangan #status-mahasiswa
+#krs #perwalian #sks #ipk #administrasi-keuangan #status-mahasiswa #syarat #syarat-krs #batas-sks #mata-kuliah-paket #sevima #mahasiswa-tidak-aktif #mengundurkan-diri
 
 - Pelaksanaan perwalian dan pengisian KRS dilaksanakan paling lambat 2 minggu sebelum awal perkuliahan dimulai.
   Penyerahan jadwal perkuliahan diserahkan oleh Program Studi ke Bagian Akademik paling lambat 3 hari sebelum pengisian KRS dimulai.

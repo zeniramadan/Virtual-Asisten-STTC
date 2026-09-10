@@ -6,13 +6,36 @@ tags:
   - stt-cipasung
   - akademik
   - kalender-akademik
+  - kalender-akademik-2026-2027
+  - tahun-akademik-2026-2027
+  - semester-gasal
   - pmb
   - pendaftaran-mahasiswa-baru
+  - gelombang-1
+  - gelombang-2
+  - gelombang-3
   - jadwal-seleksi
+  - seleksi-penerimaan
+  - pengumuman-hasil-seleksi
   - registrasi
+  - registrasi-administrasi
+  - herregistrasi
+  - perwalian
   - krs
+  - ktmb
+  - pra-ktmb
+  - awal-kuliah
+  - akhir-kuliah
+  - kprs
+  - cuti-kuliah
+  - wisuda
   - uts
   - uas
+  - libur-natal
+  - libur-tahun-baru
+  - pengolahan-nilai
+  - rapat-evaluasi-akademik
+  - jadwal-kuliah
   - kapan
   - tanggal
   - jadwal
@@ -23,7 +46,7 @@ tags:
 
 ## Pra Akademik 2026/2027 PMB (Penerimaan Mahasiswa Baru)
 
-#pmb #pendaftaran-mahasiswa-baru #jadwal-seleksi #registrasi
+#pmb #pendaftaran-mahasiswa-baru #gelombang-1 #gelombang-2 #gelombang-3 #jadwal-seleksi #seleksi-penerimaan #pengumuman-hasil-seleksi #registrasi #registrasi-administrasi
 
 | Gelombang     | Kegiatan                               | Tanggal                   |
 | ------------- | -------------------------------------- | ------------------------- |
@@ -42,7 +65,7 @@ tags:
 
 ## Kegiatan Akademik Semester Gasal 2026/2027
 
-#akademik #krs #uts #uas #jadwal-kuliah
+#akademik #krs #herregistrasi #perwalian #pra-ktmb #ktmb #awal-kuliah #akhir-kuliah #kprs #cuti-kuliah #wisuda #uts #uas #libur-natal #libur-tahun-baru #pengolahan-nilai #rapat-evaluasi-akademik #semester-gasal #jadwal-kuliah
 
 | Kegiatan Akademik                                              | Tanggal                         |
 | -------------------------------------------------------------- | ------------------------------- |

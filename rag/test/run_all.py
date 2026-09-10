@@ -1,15 +1,13 @@
 """
-Menjalankan ketiga tahap pengujian sekaligus:
+Menjalankan ketiga tahap pengujian sekaligus untuk obsidian_rag.py:
     1. Retrieval Quality (Hit Rate, Precision@k)
-    2. Generation Quality (Faithfulness)
+    2. Generation Quality (Faithfulness, judge = Gemini API)
     3. Guardrail / Stress Test
 
-Hasil detail tiap tahap disimpan ke testing/results/<timestamp>/*.json,
-supaya bisa dibandingkan antar-run tiap kali ada perubahan di sistem
-(mis. perubahan ROUTES, threshold, atau system prompt).
+Hasil detail tiap tahap disimpan ke testing_obsidian/results/<timestamp>/*.json.
 
 Cara pakai:
-    python testing/run_all.py
+    python testing_obsidian/run_all.py
 """
 
 from __future__ import annotations
@@ -22,6 +20,7 @@ from eval_faithfulness import evaluate_faithfulness
 from eval_guardrail import run_guardrail_test
 
 HERE = os.path.dirname(__file__)
+DATASET_DIR = os.path.join(HERE, "..", "..", "dataset")
 
 
 def main():
@@ -30,13 +29,13 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     print("\n########## TAHAP 1: RETRIEVAL QUALITY ##########")
-    retrieval_result = evaluate_retrieval(os.path.join(HERE, "ground_truth.json"), k=3)
+    retrieval_result = evaluate_retrieval(os.path.join(DATASET_DIR, "ground_truth.json"), k=3)
 
-    print("\n########## TAHAP 2: GENERATION QUALITY (FAITHFULNESS) ##########")
-    faithfulness_result = evaluate_faithfulness(os.path.join(HERE, "ground_truth.json"))
+    print("\n########## TAHAP 2: GENERATION QUALITY (FAITHFULNESS, judge=Gemini) ##########")
+    faithfulness_result = evaluate_faithfulness(os.path.join(DATASET_DIR, "ground_truth.json"))
 
     print("\n########## TAHAP 3: GUARDRAIL / STRESS TEST ##########")
-    guardrail_result = run_guardrail_test(os.path.join(HERE, "stress_cases.json"))
+    guardrail_result = run_guardrail_test(os.path.join(DATASET_DIR, "stress_cases.json"))
 
     for name, result in [
         ("retrieval", retrieval_result),
