@@ -1,0 +1,841 @@
+{
+  "timestamp": "2026-09-11T09:35:18.106158",
+  "judge_model": "gemini-3.5-flash-lite",
+  "n_cases_scored": 42,
+  "faithfulness_avg": 0.996,
+  "cases": [
+    {
+      "query": "syarat pendaftaran mahasiswa baru apa aja",
+      "answer": "Kak, syarat pendaftaran mahasiswa baru ada beberapa, yaitu:\n\n* Mengisi formulir pendaftaran - Online: s.id/pmbsttc\n* Membayar biaya pendaftaran\n* Scan Ijazah /SKL SMA/SMK/MA\n* Scan KTP\n* Scan pas Foto ukuran 4x6\n* Scan Kartu Keluarga\n* Scan Akta Lahir",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Mengisi formulir pendaftaran - Online: s.id/pmbsttc",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Membayar biaya pendaftaran",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Scan Ijazah /SKL SMA/SMK/MA",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Scan KTP",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Scan pas Foto ukuran 4x6",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Scan Kartu Keluarga",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Scan Akta Lahir",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "kalo mau daftar sttc perlu siapin apa aja",
+      "answer": "Kak, untuk mendaftar STTC, kamu perlu siapkan beberapa dokumen berikut:\n\n* Ijazah / SKL SMA/SMK/MA\n* KTP\n* Pas Foto ukuran 4x6\n* Kartu Keluarga\n* Akta Lahir\n* Biaya pendaftaran\n* Formulir pendaftaran yang bisa diisi secara online di s.id/pmbsttc",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Untuk mendaftar STTC perlu menyiapkan Ijazah / SKL SMA/SMK/MA",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Untuk mendaftar STTC perlu menyiapkan KTP",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Untuk mendaftar STTC perlu menyiapkan Pas Foto ukuran 4x6",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Untuk mendaftar STTC perlu menyiapkan Kartu Keluarga",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Untuk mendaftar STTC perlu menyiapkan Akta Lahir",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Untuk mendaftar STTC perlu membayar biaya pendaftaran",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Untuk mendaftar STTC perlu mengisi formulir pendaftaran secara online di s.id/pmbsttc",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "dokumen yang harus discan buat daftar kuliah apa aja",
+      "answer": "Kak, menurut informasi di atas, dokumen yang harus discan untuk pendaftaran adalah:\n\n* Ijazah / SKL SMA/SMK/MA\n* KTP\n* Pas Foto ukuran 4x6\n* Kartu Keluarga\n* Akta Lahir",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "dokumen yang harus discan untuk pendaftaran adalah Ijazah / SKL SMA/SMK/MA",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "dokumen yang harus discan untuk pendaftaran adalah KTP",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "dokumen yang harus discan untuk pendaftaran adalah Pas Foto ukuran 4x6",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "dokumen yang harus discan untuk pendaftaran adalah Kartu Keluarga",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "dokumen yang harus discan untuk pendaftaran adalah Akta Lahir",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "link atau formulir pendaftaran online dimana",
+      "answer": "Kak, formulir pendaftaran online ada di link ini: s.id/pmbsttc",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Formulir pendaftaran online ada di link s.id/pmbsttc",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "jurusan apa saja yang ada di kampus",
+      "answer": "Kak, berdasarkan informasi yang ada, jurusan yang ada di kampus adalah:\n\n- S1 INFORMATIKA\n- S1 TEKNIK INDUSTRI\n\nKak bisa melihatnya di bagian **#program-studi #teknik-industri #informatika #jurusan #jurusan-apa**.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "jurusan yang ada di kampus adalah S1 INFORMATIKA",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "jurusan yang ada di kampus adalah S1 TEKNIK INDUSTRI",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "informasi tersebut dapat dilihat di bagian #program-studi #teknik-industri #informatika #jurusan #jurusan-apa",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "ada ukm apa aja di kampus",
+      "answer": "Kak, ada beberapa UKM yang tersedia di STT Cipasung, yaitu:\n\n- Proclub (Programmig Club)\n- Kelapa (Keluarga Pecinta Alam)\n- Sanggar Terasi (Teater, Seni Rupa, Musik, Tari dan Puisi)\n- KDD (Keluarga Donor Darah)\n- Dignity (Desain Grafis Community)\n- UKM Kerohanian\n- UKM Olahraga\n- Rilis (Literasi)\n- Pencak Silat",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "STT Cipasung menyediakan beberapa UKM yaitu Proclub (Programmig Club)",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "UKM di STT Cipasung meliputi Kelapa (Keluarga Pecinta Alam)",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "UKM di STT Cipasung meliputi Sanggar Terasi (Teater, Seni Rupa, Musik, Tari dan Puisi)",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "UKM di STT Cipasung meliputi KDD (Keluarga Donor Darah)",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "UKM di STT Cipasung meliputi Dignity (Desain Grafis Community)",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "UKM di STT Cipasung meliputi UKM Kerohanian",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "UKM di STT Cipasung meliputi UKM Olahraga",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "UKM di STT Cipasung meliputi Rilis (Literasi)",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "UKM di STT Cipasung meliputi Pencak Silat",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "ada beasiswa gak buat mahasiswa baru",
+      "answer": "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!",
+      "faithfulness_score": 1.0,
+      "claims": []
+    },
+    {
+      "query": "beasiswa kip-k dapat fasilitas apa aja",
+      "answer": "Kak, beasiswa KIP-K mendapat semua fasilitas beasiswa, yaitu:\n- Bebas Biaya Awal\n- Bebas/ Potongan Biaya Semester\n- Bebas Biaya Sidang dan Wisuda\n- Dapat Uang Saku",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "beasiswa KIP-K mendapat semua fasilitas beasiswa",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "fasilitas beasiswa KIP-K meliputi Bebas Biaya Awal",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "fasilitas beasiswa KIP-K meliputi Bebas/ Potongan Biaya Semester",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "fasilitas beasiswa KIP-K meliputi Bebas Biaya Sidang dan Wisuda",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "fasilitas beasiswa KIP-K meliputi Dapat Uang Saku",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "ukt 50% dapat potongan biaya semester berapa persen",
+      "answer": "Kak, menurut informasi di atas, UKT 50% mendapat potongan biaya semester sebesar 50%.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "UKT 50% mendapat potongan biaya semester sebesar 50%",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "stt cipasung didirikan tahun berapa dan di bawah supervisi siapa",
+      "answer": "Kak, STT Cipasung didirikan pada tahun 1997 di bawah supervisi Institut Teknologi Bandung (ITB)!",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "STT Cipasung didirikan pada tahun 1997",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "STT Cipasung didirikan di bawah supervisi Institut Teknologi Bandung (ITB)",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "alamat kampus dimana",
+      "answer": "Kak, alamat kampus STT Cipasung ada di Jl. Raya Cisinga KM.1, Padakembang Tasikmalaya 46466, ya!",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Alamat kampus STT Cipasung ada di Jl. Raya Cisinga KM.1, Padakembang Tasikmalaya 46466",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "nomor telepon sama email kampus apa",
+      "answer": "Kak, nomor telepon kampus sama email kampus adalah:\n- Telepon: (0265) 2550424\n- Email: info@sttcipasung.ac.id",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Nomor telepon kampus STT Cipasung adalah (0265) 2550424",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Email kampus STT Cipasung adalah info@sttcipasung.ac.id",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "prospek kerja lulusan informatika apa aja",
+      "answer": "Kak, beberapa lapangan pekerjaan yang bisa diisi oleh lulusan informatika adalah:\n- Software developer\n- Konsultan IT\n- Web Engineer\n- Perekayasa jaringan komputer\n- Programmer\n- Game developer\nLulusan informatika juga dapat bekerja di sektor pendidikan dan menjadi peneliti di lembaga penelitian.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Beberapa lapangan pekerjaan yang bisa diisi oleh lulusan informatika adalah software developer.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa lapangan pekerjaan yang bisa diisi oleh lulusan informatika adalah konsultan IT.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa lapangan pekerjaan yang bisa diisi oleh lulusan informatika adalah web Engineer.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa lapangan pekerjaan yang bisa diisi oleh lulusan informatika adalah perekayasa jaringan komputer.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa lapangan pekerjaan yang bisa diisi oleh lulusan informatika adalah programmer.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa lapangan pekerjaan yang bisa diisi oleh lulusan informatika adalah game developer.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Lulusan informatika juga dapat bekerja di sektor pendidikan dan menjadi peneliti di lembaga penelitian.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "prospek kerja lulusan teknik industri kemana aja",
+      "answer": "Kak, prospek kerja lulusan Teknik Industri sangat luas, beberapa diantaranya adalah:\n\n* Bidang produksi\n* Bidang operasi dan penjaminan mutu\n* Bidang sistem informasi\n* Bidang pemasaran\n* Bidang logistik\n* Bidang manajemen sumber daya manusia\n* Bidang keuangan (perbankan dan asuransi)\n* Bidang konsultasi manajemen, dsb.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Prospek kerja lulusan Teknik Industri sangat luas",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa bidang prospek kerja lulusan Teknik Industri adalah bidang produksi",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa bidang prospek kerja lulusan Teknik Industri adalah bidang operasi dan penjaminan mutu",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa bidang prospek kerja lulusan Teknik Industri adalah bidang sistem informasi",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa bidang prospek kerja lulusan Teknik Industri adalah bidang pemasaran",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa bidang prospek kerja lulusan Teknik Industri adalah bidang logistik",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa bidang prospek kerja lulusan Teknik Industri adalah bidang manajemen sumber daya manusia",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa bidang prospek kerja lulusan Teknik Industri adalah bidang keuangan (perbankan dan asuransi)",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Beberapa bidang prospek kerja lulusan Teknik Industri adalah bidang konsultasi manajemen, dsb",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "cara mengisi krs",
+      "answer": "Kak, untuk mengisi KRS, ikuti langkah-langkah berikut:\n\n- Pastikan jaringan internet Anda stabil dan telah melakukan konfirmasi tagihan pembayaran ke Bagian Keuangan di kantor Tata Usaha.\n- Setelah terhubung dengan jaringan internet kampus, silahkan Anda masuk ke halaman http://31.58.158.149:8060/.\n- Masukan Username (Nomor Induk Mahasiswa/NIM Anda) dan Password (Tanggal Lahir Anda dengan format YYYYMMDD).\n- Setelah Anda berhasil Login, maka sistem akan menampilkan halaman utama.\n- Jika, pembayaran telah terkonfirmasi, maka pilih menu Perkuliahan, kemudian pilih Kartu Rencana Studi Online.\n- Setelah masuk halaman Kartu Rencana Studi Online silahkan tekan tombol Tambah.\n- Silahkan Pilih (Centang) Mata Kuliah sesuai dengan kelas dan mata kuliah yang akan diambil pada semester yang akan berlangsung, lalu Klik Simpan.\n- Setelah Klik Simpan, kemudian sistem akan menampilkan Mata Kuliah yang telah Anda Pilih.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Pastikan jaringan internet Anda stabil dan telah melakukan konfirmasi tagihan pembayaran ke Bagian Keuangan di kantor Tata Usaha.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Setelah terhubung dengan jaringan internet kampus, silahkan Anda masuk ke halaman http://31.58.158.149:8060/.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Masukan Username (Nomor Induk Mahasiswa/NIM Anda) dan Password (Tanggal Lahir Anda dengan format YYYYMMDD).",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Setelah Anda berhasil Login, maka sistem akan menampilkan halaman utama.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Jika, pembayaran telah terkonfirmasi, maka pilih menu Perkuliahan, kemudian pilih Kartu Rencana Studi Online.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Setelah masuk halaman Kartu Rencana Studi Online silahkan tekan tombol Tambah.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Silahkan Pilih (Centang) Mata Kuliah sesuai dengan kelas dan mata kuliah yang akan diambil pada semester yang akan berlangsung, lalu Klik Simpan.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Setelah Klik Simpan, kemudian sistem akan menampilkan Mata Kuliah yang telah Anda Pilih.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "gimana cara login ke sistem krs online",
+      "answer": "Kak, untuk login ke sistem KRS online, silakan ikuti langkah-langkah berikut:\n\n* Pastikan jaringan internet Anda stabil dan telah melakukan konfirmasi tagihan pembayaran ke Bagian Keuangan di kantor Tata Usaha.\n* Setelah terhubung dengan jaringan internet kampus, silahkan Anda masuk ke halaman http://31.58.158.149:8060/.\n* Kemudian, masukan Username (Nomor Induk Mahasiswa/NIM Anda) dan Password (Tanggal Lahir Anda dengan format YYYYMMDD) contoh: 20010512. Kemudian tekan Login.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Pastikan jaringan internet Anda stabil dan telah melakukan konfirmasi tagihan pembayaran ke Bagian Keuangan di kantor Tata Usaha.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Setelah terhubung dengan jaringan internet kampus, silahkan Anda masuk ke halaman http://31.58.158.149:8060/.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Kemudian, masukan Username (Nomor Induk Mahasiswa/NIM Anda) dan Password (Tanggal Lahir Anda dengan format YYYYMMDD) contoh: 20010512. Kemudian tekan Login.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "username sama password buat login krs apa",
+      "answer": "Kak, informasi yang kakak tanyakan ada di panduan pengisian KRS! \n\n- Silahkan masukan Username (Nomor Induk Mahasiswa/NIM Anda) dan Password (Tanggal Lahir Anda dengan format YYYYMMDD) contoh: 20010512.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Silahkan masukan Username (Nomor Induk Mahasiswa/NIM Anda) dan Password (Tanggal Lahir Anda dengan format YYYYMMDD) contoh: 20010512.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "syarat perwalian online",
+      "answer": "Kak, syarat perwalian online ada di dalam informasi ini:\n\n- Pelaksanaan perwalian dan pengisian KRS dilaksanakan paling lambat 2 minggu sebelum awal perkuliahan dimulai.\n- Penyerahan jadwal perkuliahan diserahkan oleh Program Studi ke Bagian Akademik paling lambat 3 hari sebelum pengisian KRS dimulai.\n- Pengisian KRS dapat dilakukan bagi mahasiswa yang telah menyelesaikan administrasi keuangan sesuai dengan ketentuan.\n- Bagi mahasiswa yang tidak perwalian dan melakukan KRS-an maka dinyatakan tidak aktif pada semester berlangsung.\n  Bagi mahasiswa yang tidak aktif dalam semester berturut-turut dinyatakan mengundurkan diri.",
+      "faithfulness_score": 0.833,
+      "claims": [
+        {
+          "claim": "Kak, syarat perwalian online ada di dalam informasi ini",
+          "verdict": "UNSUPPORTED"
+        },
+        {
+          "claim": "Pelaksanaan perwalian dan pengisian KRS dilaksanakan paling lambat 2 minggu sebelum awal perkuliahan dimulai.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Penyerahan jadwal perkuliahan diserahkan oleh Program Studi ke Bagian Akademik paling lambat 3 hari sebelum pengisian KRS dimulai.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Pengisian KRS dapat dilakukan bagi mahasiswa yang telah menyelesaikan administrasi keuangan sesuai dengan ketentuan.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Bagi mahasiswa yang tidak perwalian dan melakukan KRS-an maka dinyatakan tidak aktif pada semester berlangsung.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Bagi mahasiswa yang tidak aktif dalam semester berturut-turut dinyatakan mengundurkan diri.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "prosedur pengisian rencana studi gimana",
+      "answer": "Kak, untuk pengisian rencana studi, kamu bisa mengikuti langkah-langkah di bawah ini:\n\n* Pastikan jaringan internet stabil dan telah melakukan konfirmasi tagihan pembayaran ke Bagian Keuangan di kantor Tata Usaha.\n* Masuk ke halaman http://31.58.158.149:8060/ dengan menggunakan Username (Nomor Induk Mahasiswa/NIM) dan Password (Tanggal Lahir Anda dengan format YYYYMMDD).\n* Setelah Login, pilih menu Perkuliahan, kemudian pilih Kartu Rencana Studi Online.\n* Jika pembayaran telah terkonfirmasi, maka kamu bisa melanjutkan ke langkah berikutnya.\n* Pilih Mata Kuliah sesuai dengan kelas dan mata kuliah yang akan diambil pada semester yang akan berlangsung, lalu Klik Simpan.\n* Setelah Klik Simpan, sistem akan menampilkan Mata Kuliah yang telah Anda Pilih.\n* Untuk mencetak Kartu Rencana Studi, pilih Menu Laporan, kemudian pilih Kartu Rencana Studi dan klik Tampilkan Laporan.\n* Klik Tombol Cetak.\n\nSemoga informasi ini membantu, kak!",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Pastikan jaringan internet stabil dan telah melakukan konfirmasi tagihan pembayaran ke Bagian Keuangan di kantor Tata Usaha.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Masuk ke halaman http://31.58.158.149:8060/ dengan menggunakan Username (Nomor Induk Mahasiswa/NIM) dan Password (Tanggal Lahir Anda dengan format YYYYMMDD).",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Setelah Login, pilih menu Perkuliahan, kemudian pilih Kartu Rencana Studi Online.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Jika pembayaran telah terkonfirmasi, maka kamu bisa melanjutkan ke langkah berikutnya.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Pilih Mata Kuliah sesuai dengan kelas dan mata kuliah yang akan diambil pada semester yang akan berlangsung, lalu Klik Simpan.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Setelah Klik Simpan, sistem akan menampilkan Mata Kuliah yang telah Anda Pilih.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Untuk mencetak Kartu Rencana Studi, pilih Menu Laporan, kemudian pilih Kartu Rencana Studi dan klik Tampilkan Laporan.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Klik Tombol Cetak.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "maksimal sks yang boleh diambil berapa",
+      "answer": "Kak, informasi yang kakak tanyakan ada di panduan kami. Maksimal SKS yang boleh diambil adalah 24 SKS, termasuk SKS yang mengulang bagi mahasiswa dengan IPK >= 3.00.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Maksimal SKS yang boleh diambil adalah 24 SKS, termasuk SKS yang mengulang bagi mahasiswa dengan IPK >= 3.00.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "kalau ipk di bawah 3 boleh ambil mata kuliah bebas gak",
+      "answer": "Maaf kak, menurut informasi yang ada, bagi mahasiswa dengan IPK < 3.00 hanya diperkenankan mengambil mata kuliah paket semester.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Bagi mahasiswa dengan IPK < 3.00 hanya diperkenankan mengambil mata kuliah paket semester.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "cara cetak krs gimana",
+      "answer": "Kak, untuk mencetak Kartu Rencana Studi (KRS), silakan ikuti langkah-langkah berikut:\n\n- Pastikan jaringan internet Anda stabil dan telah melakukan konfirmasi tagihan pembayaran ke Bagian Keuangan di kantor Tata Usaha.\n- Setelah terhubung dengan jaringan internet kampus, silahkan Anda masuk ke halaman http://31.58.158.149:8060/.\n- Masukan Username (Nomor Induk Mahasiswa/NIM Anda) dan Password (Tanggal Lahir Anda dengan format YYYYMMDD).\n- Setelah Anda berhasil Login, maka sistem akan menampilkan halaman utama.\n- Pilih menu Laporan, kemudian pilih Kartu Rencana Studi dan klik Tampilkan Laporan.\n- Klik Tombol Cetak.\n- Kartu Rencana Studi Anda telah berhasil dicetak.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Untuk mencetak Kartu Rencana Studi (KRS), pastikan jaringan internet Anda stabil dan telah melakukan konfirmasi tagihan pembayaran ke Bagian Keuangan di kantor Tata Usaha.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Setelah terhubung dengan jaringan internet kampus, silahkan Anda masuk ke halaman http://31.58.158.149:8060/.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Masukan Username (Nomor Induk Mahasiswa/NIM Anda) dan Password (Tanggal Lahir Anda dengan format YYYYMMDD).",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Setelah Anda berhasil Login, maka sistem akan menampilkan halaman utama.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Pilih menu Laporan, kemudian pilih Kartu Rencana Studi dan klik Tampilkan Laporan.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Klik Tombol Cetak.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Kartu Rencana Studi Anda telah berhasil dicetak.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "apa itu perwalian",
+      "answer": "Kak, perwalian adalah proses bimbingan, konsultasi, dan pengawasan terstruktur antara Dosen Pembimbing Akademik (dosen wali) dengan mahasiswa yang bertujuan untuk membantu mahasiswa merencanakan, mengevaluasi, dan menyelesaikan seluruh tahapan studi secara optimal.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Perwalian adalah proses bimbingan, konsultasi, dan pengawasan terstruktur antara Dosen Pembimbing Akademik (dosen wali) dengan mahasiswa",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Perwalian bertujuan untuk membantu mahasiswa merencanakan, mengevaluasi, dan menyelesaikan seluruh tahapan studi secara optimal",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "kalau gak perwalian terus gak krs-an statusnya jadi apa",
+      "answer": "Kak, menurut informasi yang ada, kalau mahasiswa tidak perwalian dan melakukan KRS-an, maka statusnya dinyatakan tidak aktif pada semester berlangsung.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Mahasiswa yang tidak perwalian dan melakukan KRS-an dinyatakan tidak aktif pada semester berlangsung.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "biaya kuliah berapa",
+      "answer": "Kak, informasi biaya kuliah ada di Rincian Biaya Kuliah Stt Cipasung. Berikut adalah rincian biaya kuliah:\n\n* Biaya Awal: 2.750.000\n* Biaya UKT: 3.000.000 (dicicil per bulan)\n* Semester I: 5.750.000 (Gabungan Biaya Awal + UKT)\n* Semester II: 3.000.000\n* Semester III: 3.000.000\n* Semester IV: 3.000.000\n* Semester V: 3.000.000\n* Semester VI: 3.000.000\n* Semester VII: 3.400.000 (Termasuk tambahan untuk biaya Sidang KP)\n* Semester VIII: 6.000.000 (Termasuk tambahan untuk biaya Sidang TA & Wisuda)\n* Total Biaya Kuliah: 30.150.000",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Informasi biaya kuliah ada di Rincian Biaya Kuliah Stt Cipasung.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Biaya Awal adalah 2.750.000.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Biaya UKT adalah 3.000.000 dan bisa dicicil per bulan.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Semester I adalah 5.750.000 sebagai gabungan Biaya Awal + UKT.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Semester II adalah 3.000.000.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Semester III adalah 3.000.000.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Semester IV adalah 3.000.000.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Semester V adalah 3.000.000.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Semester VI adalah 3.000.000.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Semester VII adalah 3.400.000 termasuk tambahan untuk biaya Sidang KP.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Semester VIII adalah 6.000.000 termasuk tambahan untuk biaya Sidang TA & Wisuda.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Total Biaya Kuliah adalah 30.150.000.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "ukt per semester berapa",
+      "answer": "Kak, informasi tentang UKT per semester ada di tabel biaya. UKT per semester adalah 3.000.000.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Informasi tentang UKT per semester ada di tabel biaya.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "UKT per semester adalah 3.000.000.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "biaya pendaftaran berapa",
+      "answer": "Kak, biaya pendaftaran adalah Rp 250.000.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Biaya pendaftaran adalah Rp 250.000.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "biaya awal masuk kuliah ada apa aja",
+      "answer": "Kak, biaya awal masuk kuliah ada beberapa hal, yaitu:\n\n* Biaya Pendaftaran (Rp 250.000)\n* Jas Almamater\n* Kartu Tanda Mahasiswa\n* Orientasi Kampus\n* Uang Bangunan\n\nSemua biaya tersebut harus dibayarkan 1 kali di awal, ya!",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Biaya awal masuk kuliah meliputi Biaya Pendaftaran (Rp 250.000)",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Biaya awal masuk kuliah meliputi Jas Almamater",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Biaya awal masuk kuliah meliputi Kartu Tanda Mahasiswa",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Biaya awal masuk kuliah meliputi Orientasi Kampus",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Biaya awal masuk kuliah meliputi Uang Bangunan",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Semua biaya tersebut harus dibayarkan 1 kali di awal",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "bayar ukt bisa dicicil gak",
+      "answer": "Kak, informasi tentang biaya UKT bisa dicicil per bulan ada di tabel biaya. \n\n- Biaya UKT: Uang Kuliah Tunggal yang dibayarkan setiap semester (6 bulan). Bisa dicicil per bulan.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Informasi tentang biaya UKT bisa dicicil per bulan ada di tabel biaya.",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Biaya UKT adalah Uang Kuliah Tunggal yang dibayarkan setiap semester (6 bulan).",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Biaya UKT bisa dicicil per bulan.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "total biaya kuliah sampai lulus berapa",
+      "answer": "Kak, total biaya kuliah sampai lulus adalah Rp 30.150.000.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Total biaya kuliah sampai lulus adalah Rp 30.150.000.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "biaya sidang ta berapa",
+      "answer": "Kak, biaya Sidang TA & Wisuda adalah Rp 3.000.000.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Biaya Sidang TA & Wisuda adalah Rp 3.000.000.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "semester 7 ada biaya tambahan apa",
+      "answer": "Kak, biaya tambahan di semester 7 adalah biaya Sidang KP sebesar 400.000.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Biaya tambahan di semester 7 adalah biaya Sidang KP sebesar 400.000.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "kapan pmb gelombang 1 dibuka",
+      "answer": "Kak, informasi tentang PMB Gelombang 1 dibuka pada tanggal 02 Januari – 09 Mei 2026.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "PMB Gelombang 1 dibuka pada tanggal 02 Januari – 09 Mei 2026",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "pendaftaran gelombang 3 mulai kapan",
+      "answer": "Kak, informasi tentang pendaftaran Gelombang III sudah ada di kalender PMB 2026/2027! Pendaftaran Mahasiswa untuk Gelombang III dimulai pada tanggal 20 Juli 2026.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "informasi tentang pendaftaran Gelombang III sudah ada di kalender PMB 2026/2027",
+          "verdict": "SUPPORTED"
+        },
+        {
+          "claim": "Pendaftaran Mahasiswa untuk Gelombang III dimulai pada tanggal 20 Juli 2026",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "jadwal uts kapan",
+      "answer": "Kak, jadwal UTS (Ujian Tengah Semester) adalah 02 – 07 November 2026.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Jadwal UTS (Ujian Tengah Semester) adalah 02 – 07 November 2026.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "jadwal uas kapan",
+      "answer": "Kak, jadwal UAS (Ujian Akhir Semester) adalah 04 – 09 Januari 2027.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Jadwal UAS (Ujian Akhir Semester) adalah 04 – 09 Januari 2027.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "kapan pengumuman hasil seleksi gelombang 2",
+      "answer": "Kak, pengumuman hasil seleksi gelombang 2 adalah pada tanggal **25 Juli 2026**.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "pengumuman hasil seleksi gelombang 2 adalah pada tanggal 25 Juli 2026",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "kapan wisuda",
+      "answer": "Kak, wisuda akan diadakan pada tanggal 24 Oktober 2026.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Wisuda akan diadakan pada tanggal 24 Oktober 2026.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "jadwal herregistrasi kapan",
+      "answer": "Kak, jadwal herregistrasi dan perwalian/KRS adalah dari tanggal 31 Agustus – 12 September 2026.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Jadwal herregistrasi dan perwalian/KRS adalah dari tanggal 31 Agustus – 12 September 2026.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "ktmb dilaksanakan tanggal berapa",
+      "answer": "Kak, KTMB 2026 akan dilaksanakan pada tanggal 07 - 12 September 2026.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "KTMB 2026 akan dilaksanakan pada tanggal 07 - 12 September 2026",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "batas waktu cuti kuliah atau kprs kapan",
+      "answer": "Kak, batas waktu Kartu Perubahan Rencana Studi (KPRS) / Cuti Kuliah adalah tanggal 30 September 2026.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "batas waktu Kartu Perubahan Rencana Studi (KPRS) / Cuti Kuliah adalah tanggal 30 September 2026",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    },
+    {
+      "query": "libur natal kapan",
+      "answer": "Kak, libur Natal adalah pada tanggal 25 Desember 2026.",
+      "faithfulness_score": 1.0,
+      "claims": [
+        {
+          "claim": "Libur Natal adalah pada tanggal 25 Desember 2026.",
+          "verdict": "SUPPORTED"
+        }
+      ]
+    }
+  ]
+}

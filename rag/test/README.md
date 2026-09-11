@@ -79,6 +79,10 @@ python testing_obsidian/run_all.py
   tapi tercampur note lain yang kurang relevan di posisi atas; cek urutan
   sort di `retrieve_with_debug()` (`exact_tags` → `distance` → `tag_overlap`
   → `overlap`).
+- **Recall@k** menunjukkan apakah note yang diharapkan muncul di top-k. Dengan
+  satu `expected_title` per query, nilainya sama dengan Hit Rate@k.
+- **NDCG@k** memberi nilai lebih tinggi jika note yang benar muncul di posisi
+  lebih atas, sehingga berguna untuk mengevaluasi kualitas urutan hasil.
 - **Faithfulness turun** → baca field `claims` di hasil detail untuk lihat
   klaim spesifik yang `UNSUPPORTED`.
 - **Guardrail pass rate turun** → baca `answer` pada kasus `❌ GAGAL` di

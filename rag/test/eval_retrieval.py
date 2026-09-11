@@ -1,7 +1,8 @@
 """
 Tahap 1: Retrieval Quality Evaluation (Ground-Truth Evaluation)
 Untuk obsidian_rag.py -- mengukur Hit Rate@k dan Precision@k berdasarkan
-judul note (metadata['title']) yang seharusnya muncul di top-k hasil.
+judul note (metadata['title']) yang seharusnya muncul di top-k hasil, serta
+Recall@k dan NDCG@k.
 
 PENTING: ground_truth.json di folder dataset isinya CONTOH/placeholder. Sesuaikan
 "expected_title" dengan judul note yang SEBENARNYA ada di vault Obsidian kamu
@@ -14,6 +15,7 @@ Cara pakai:
 from __future__ import annotations
 import argparse
 import json
+import math
 import os
 import sys
 from datetime import datetime
@@ -34,6 +36,8 @@ def evaluate_retrieval(dataset_path: str, k: int = 3) -> dict:
     per_case = []
     hits = 0
     precisions = []
+    recalls = []
+    ndcgs = []
 
     for case in cases:
         query, expected = case["query"], case["expected_title"]
@@ -44,9 +48,14 @@ def evaluate_retrieval(dataset_path: str, k: int = 3) -> dict:
 
         hit = expected in titles
         precision = titles.count(expected) / len(top_k) if top_k else 0.0
+        recall = 1.0 if hit else 0.0
+        rank = titles.index(expected) + 1 if hit else None
+        ndcg = 1.0 / math.log2(rank + 1) if rank else 0.0
 
         hits += hit
         precisions.append(precision)
+        recalls.append(recall)
+        ndcgs.append(ndcg)
 
         per_case.append({
             "query": query,
@@ -54,6 +63,9 @@ def evaluate_retrieval(dataset_path: str, k: int = 3) -> dict:
             "top_k_titles": titles,
             "hit": hit,
             "precision_at_k": round(precision, 3),
+            "recall_at_k": round(recall, 3),
+            "ndcg_at_k": round(ndcg, 3),
+            "rank": rank,
         })
 
         status = "✅" if hit else "❌"
@@ -66,12 +78,16 @@ def evaluate_retrieval(dataset_path: str, k: int = 3) -> dict:
         "n_cases": n,
         "hit_rate": round(hits / n, 4) if n else 0.0,
         "precision_at_k_avg": round(sum(precisions) / n, 4) if n else 0.0,
+        "recall_at_k_avg": round(sum(recalls) / n, 4) if n else 0.0,
+        "ndcg_at_k_avg": round(sum(ndcgs) / n, 4) if n else 0.0,
         "cases": per_case,
     }
 
     print(f"\n=== RETRIEVAL QUALITY (k={k}, n={n}) ===")
     print(f"Hit Rate@{k}      : {result['hit_rate']:.2%}")
     print(f"Precision@{k} avg : {result['precision_at_k_avg']:.2%}")
+    print(f"Recall@{k} avg    : {result['recall_at_k_avg']:.2%}")
+    print(f"NDCG@{k} avg      : {result['ndcg_at_k_avg']:.2%}")
 
     return result
 

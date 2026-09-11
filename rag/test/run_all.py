@@ -49,6 +49,8 @@ def main():
     print(f"\n\n=== RINGKASAN ({ts}) ===")
     print(f"Hit Rate@3        : {retrieval_result['hit_rate']:.2%}")
     print(f"Precision@3 avg   : {retrieval_result['precision_at_k_avg']:.2%}")
+    print(f"Recall@3 avg      : {retrieval_result['recall_at_k_avg']:.2%}")
+    print(f"NDCG@3 avg        : {retrieval_result['ndcg_at_k_avg']:.2%}")
     if faithfulness_result["faithfulness_avg"] is not None:
         print(f"Faithfulness avg  : {faithfulness_result['faithfulness_avg']:.2%}")
     print(f"Guardrail pass    : {guardrail_result['pass_rate']:.2%}")

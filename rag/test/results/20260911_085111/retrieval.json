@@ -1,9 +1,11 @@
 {
-  "timestamp": "2026-09-10T20:13:15.282831",
+  "timestamp": "2026-09-11T08:51:23.868475",
   "k": 3,
   "n_cases": 42,
   "hit_rate": 1.0,
-  "precision_at_k_avg": 0.9325,
+  "precision_at_k_avg": 0.8968,
+  "recall_at_k_avg": 1.0,
+  "ndcg_at_k_avg": 0.9912,
   "cases": [
     {
       "query": "syarat pendaftaran mahasiswa baru apa aja",
@@ -14,7 +16,10 @@
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "kalo mau daftar sttc perlu siapin apa aja",
@@ -23,7 +28,10 @@
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "dokumen yang harus discan buat daftar kuliah apa aja",
@@ -33,7 +41,10 @@
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 0.5
+      "precision_at_k": 0.5,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "link atau formulir pendaftaran online dimana",
@@ -43,7 +54,10 @@
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "jurusan apa saja yang ada di kampus",
@@ -52,7 +66,10 @@
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "ada ukm apa aja di kampus",
@@ -61,7 +78,10 @@
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "ada beasiswa gak buat mahasiswa baru",
@@ -72,7 +92,10 @@
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "beasiswa kip-k dapat fasilitas apa aja",
@@ -83,7 +106,10 @@
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "ukt 50% dapat potongan biaya semester berapa persen",
@@ -91,10 +117,13 @@
       "top_k_titles": [
         "PMB",
         "BIAYA",
-        "BIAYA"
+        "PMB"
       ],
       "hit": true,
-      "precision_at_k": 0.333
+      "precision_at_k": 0.667,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "stt cipasung didirikan tahun berapa dan di bawah supervisi siapa",
@@ -102,10 +131,13 @@
       "top_k_titles": [
         "PMB",
         "PMB",
-        "PMB"
+        "BIAYA"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 0.667,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "alamat kampus dimana",
@@ -115,7 +147,10 @@
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "nomor telepon sama email kampus apa",
@@ -126,7 +161,10 @@
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "prospek kerja lulusan informatika apa aja",
@@ -137,7 +175,10 @@
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "prospek kerja lulusan teknik industri kemana aja",
@@ -148,7 +189,10 @@
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "cara mengisi krs",
@@ -159,7 +203,10 @@
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "gimana cara login ke sistem krs online",
@@ -170,7 +217,10 @@
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "username sama password buat login krs apa",
@@ -181,7 +231,10 @@
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "syarat perwalian online",
@@ -192,7 +245,10 @@
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "prosedur pengisian rencana studi gimana",
@@ -203,27 +259,36 @@
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "maksimal sks yang boleh diambil berapa",
       "expected_title": "KRS",
       "top_k_titles": [
+        "KRS",
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "kalau ipk di bawah 3 boleh ambil mata kuliah bebas gak",
       "expected_title": "KRS",
       "top_k_titles": [
         "KRS",
-        "KRS",
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "cara cetak krs gimana",
@@ -234,7 +299,10 @@
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "apa itu perwalian",
@@ -245,7 +313,10 @@
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "kalau gak perwalian terus gak krs-an statusnya jadi apa",
@@ -256,92 +327,113 @@
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "biaya kuliah berapa",
       "expected_title": "BIAYA",
       "top_k_titles": [
         "BIAYA",
-        "BIAYA",
+        "PMB",
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 0.667
+      "precision_at_k": 0.333,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "ukt per semester berapa",
       "expected_title": "BIAYA",
       "top_k_titles": [
-        "BIAYA",
         "BIAYA"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "biaya pendaftaran berapa",
       "expected_title": "BIAYA",
       "top_k_titles": [
-        "BIAYA",
         "PMB",
         "BIAYA"
       ],
       "hit": true,
-      "precision_at_k": 0.667
+      "precision_at_k": 0.5,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 0.631,
+      "rank": 2
     },
     {
       "query": "biaya awal masuk kuliah ada apa aja",
       "expected_title": "BIAYA",
       "top_k_titles": [
         "BIAYA",
-        "BIAYA",
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 0.667
+      "precision_at_k": 0.5,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "bayar ukt bisa dicicil gak",
       "expected_title": "BIAYA",
       "top_k_titles": [
-        "BIAYA",
         "BIAYA"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "total biaya kuliah sampai lulus berapa",
       "expected_title": "BIAYA",
       "top_k_titles": [
         "BIAYA",
-        "BIAYA",
+        "PMB",
         "PMB"
       ],
       "hit": true,
-      "precision_at_k": 0.667
+      "precision_at_k": 0.333,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "biaya sidang ta berapa",
       "expected_title": "BIAYA",
       "top_k_titles": [
-        "BIAYA",
         "BIAYA"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "semester 7 ada biaya tambahan apa",
       "expected_title": "BIAYA",
       "top_k_titles": [
         "BIAYA",
-        "BIAYA",
         "KRS"
       ],
       "hit": true,
-      "precision_at_k": 0.667
+      "precision_at_k": 0.5,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "kapan pmb gelombang 1 dibuka",
@@ -350,7 +442,10 @@
         "KALENDER"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "pendaftaran gelombang 3 mulai kapan",
@@ -359,29 +454,36 @@
         "KALENDER"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "jadwal uts kapan",
       "expected_title": "KALENDER",
       "top_k_titles": [
         "KALENDER",
-        "KALENDER",
         "KALENDER"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "jadwal uas kapan",
       "expected_title": "KALENDER",
       "top_k_titles": [
         "KALENDER",
-        "KALENDER",
         "KALENDER"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "kapan pengumuman hasil seleksi gelombang 2",
@@ -390,18 +492,23 @@
         "KALENDER"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "kapan wisuda",
       "expected_title": "KALENDER",
       "top_k_titles": [
         "KALENDER",
-        "KALENDER",
         "KALENDER"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "jadwal herregistrasi kapan",
@@ -409,10 +516,13 @@
       "top_k_titles": [
         "KALENDER",
         "KALENDER",
-        "KALENDER"
+        "KRS"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 0.667,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "ktmb dilaksanakan tanggal berapa",
@@ -422,27 +532,34 @@
         "KALENDER"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "batas waktu cuti kuliah atau kprs kapan",
       "expected_title": "KALENDER",
       "top_k_titles": [
-        "KALENDER",
         "KALENDER"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     },
     {
       "query": "libur natal kapan",
       "expected_title": "KALENDER",
       "top_k_titles": [
-        "KALENDER",
         "KALENDER"
       ],
       "hit": true,
-      "precision_at_k": 1.0
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "rank": 1
     }
   ]
 }
