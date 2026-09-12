@@ -20,7 +20,7 @@
 </div>
 
 <div style="border-left: 4px solid #0ea5e9; padding: 12px 16px; margin: 20px 0; background: #f0f9ff;">
-<strong>Minci adalah asisten virtual akademik STT Cipasung yang membantu mahasiswa dan calon mahasiswa mencari informasi PMB, KRS, biaya kuliah, kalender akademik, program studi, beasiswa, dan layanan kampus. Minci menjawab berdasarkan dokumen resmi lokal melalui RAG dan model bahasa Ollama, serta dapat diakses dari terminal atau WhatsApp.
+Minci adalah asisten virtual akademik STT Cipasung yang membantu mahasiswa dan calon mahasiswa mencari informasi PMB, KRS, biaya kuliah, kalender akademik, program studi, beasiswa, dan layanan kampus. Minci menjawab berdasarkan dokumen resmi lokal melalui RAG dan model bahasa Ollama, serta dapat diakses dari terminal atau WhatsApp.
 </div>
 
 ## Navigasi
