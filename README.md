@@ -40,12 +40,12 @@
 
 Minci adalah prototipe asisten akademik untuk mahasiswa dan calon mahasiswa STT Cipasung. Cakupan informasi berasal dari empat catatan resmi di folder `documents/`:
 
-| Sumber | Isi yang tersedia |
-| --- | --- |
-| `PMB.md` | Persyaratan pendaftaran, program studi, profil kampus, prospek kerja, UKM, kontak, dan beasiswa. |
-| `KRS.md` | Login, pengisian dan pencetakan KRS, perwalian, batas SKS, pembayaran, IPK, dan status mahasiswa. |
-| `BIAYA.md` | Biaya awal, UKT, cicilan, biaya tiap semester, sidang, wisuda, dan total biaya kuliah. |
-| `KALENDER.md` | Jadwal PMB 2026 serta kalender akademik semester gasal 2026/2027. |
+| Sumber        | Isi yang tersedia                                                                                 |
+| ------------- | ------------------------------------------------------------------------------------------------- |
+| `PMB.md`      | Persyaratan pendaftaran, program studi, profil kampus, prospek kerja, UKM, kontak, dan beasiswa.  |
+| `KRS.md`      | Login, pengisian dan pencetakan KRS, perwalian, batas SKS, pembayaran, IPK, dan status mahasiswa. |
+| `BIAYA.md`    | Biaya awal, UKT, cicilan, biaya tiap semester, sidang, wisuda, dan total biaya kuliah.            |
+| `KALENDER.md` | Jadwal PMB 2026 serta kalender akademik semester gasal 2026/2027.                                 |
 
 Informasi yang tidak ada di catatan akan menghasilkan jawaban fallback. Sistem tidak melakukan pencarian web dan tidak dirancang untuk menjawab pertanyaan umum di luar cakupan dokumen.
 
@@ -94,15 +94,15 @@ flowchart LR
 
 ### Parameter Retrieval
 
-| Konstanta | Nilai | Fungsi |
-| --- | ---: | --- |
-| `EMBED_MODEL` | `bge-m3` | Model embedding Ollama. |
-| `CHAT_MODEL` | `minci` | Model chat Ollama. |
-| `RETRIEVAL_K` | `15` | Jumlah kandidat awal dari ChromaDB. |
-| `FINAL_CONTEXT_K` | `3` | Jumlah chunk yang dikirim ke model. |
-| `MAX_DISTANCE` | `0.60` | Batas maksimum cosine distance. |
-| `MIN_OVERLAP_IF_LONG_QUERY` | `1` | Minimal overlap untuk query panjang. |
-| `COLLECTION_NAME` | `obsidian_vault` | Nama collection ChromaDB. |
+| Konstanta                   |            Nilai | Fungsi                               |
+| --------------------------- | ---------------: | ------------------------------------ |
+| `EMBED_MODEL`               |         `bge-m3` | Model embedding Ollama.              |
+| `CHAT_MODEL`                |          `minci` | Model chat Ollama.                   |
+| `RETRIEVAL_K`               |             `15` | Jumlah kandidat awal dari ChromaDB.  |
+| `FINAL_CONTEXT_K`           |              `3` | Jumlah chunk yang dikirim ke model.  |
+| `MAX_DISTANCE`              |           `0.60` | Batas maksimum cosine distance.      |
+| `MIN_OVERLAP_IF_LONG_QUERY` |              `1` | Minimal overlap untuk query panjang. |
+| `COLLECTION_NAME`           | `obsidian_vault` | Nama collection ChromaDB.            |
 
 ## Struktur Repository
 
@@ -297,11 +297,11 @@ python -m uvicorn app:app --host 0.0.0.0 --port 8000
 
 Endpoint yang tersedia:
 
-| Method | Endpoint | Fungsi |
-| --- | --- | --- |
-| `GET` | `/` | Health check. |
-| `GET` | `/webhook` | Verifikasi callback Meta menggunakan `hub.verify_token`. |
-| `POST` | `/webhook` | Menerima pesan WhatsApp dan menjadwalkan balasan. |
+| Method | Endpoint   | Fungsi                                                   |
+| ------ | ---------- | -------------------------------------------------------- |
+| `GET`  | `/`        | Health check.                                            |
+| `GET`  | `/webhook` | Verifikasi callback Meta menggunakan `hub.verify_token`. |
+| `POST` | `/webhook` | Menerima pesan WhatsApp dan menjadwalkan balasan.        |
 
 Health check lokal:
 
@@ -379,15 +379,15 @@ Panduan metrik dan interpretasi tersedia di [rag/test/GUIDE.md](rag/test/GUIDE.m
 
 ## Dataset dan Training
 
-| File | Peran |
-| --- | --- |
-| `dataset/chitchat.json` | Daftar frasa greeting, smalltalk, terima kasih, dan percakapan ringan yang dipakai detektor chitchat. |
-| `dataset/dataset_finetuning.json` | Pasangan instruction, input, dan output untuk contoh fine-tuning. |
-| `dataset/dataset_minci.json` | Contoh percakapan Minci dengan context dan jawaban. |
-| `dataset/ground_truth.json` | Pertanyaan dengan target judul note untuk evaluasi retrieval dan faithfulness. |
-| `dataset/stress_cases.json` | Kasus out-of-context, ambigu, prompt injection, dan jailbreak. |
-| `pertanyaan.md` | Kumpulan pertanyaan manual dan ekspektasi jawaban, termasuk kasus fallback. |
-| `training/model_training.ipynb` | Notebook training/fine-tuning model. Jalankan melalui Jupyter atau VS Code Notebook. |
+| File                              | Peran                                                                                                 |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `dataset/chitchat.json`           | Daftar frasa greeting, smalltalk, terima kasih, dan percakapan ringan yang dipakai detektor chitchat. |
+| `dataset/dataset_finetuning.json` | Pasangan instruction, input, dan output untuk contoh fine-tuning.                                     |
+| `dataset/dataset_minci.json`      | Contoh percakapan Minci dengan context dan jawaban.                                                   |
+| `dataset/ground_truth.json`       | Pertanyaan dengan target judul note untuk evaluasi retrieval dan faithfulness.                        |
+| `dataset/stress_cases.json`       | Kasus out-of-context, ambigu, prompt injection, dan jailbreak.                                        |
+| `pertanyaan.md`                   | Kumpulan pertanyaan manual dan ekspektasi jawaban, termasuk kasus fallback.                           |
+| `training/model_training.ipynb`   | Notebook training/fine-tuning model. Jalankan melalui Jupyter atau VS Code Notebook.                  |
 
 ## Troubleshooting
 
