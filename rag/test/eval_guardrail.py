@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 dotenv_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
 load_dotenv(dotenv_path=dotenv_path)
 
-MODULE_NAME = os.environ.get("MODULE_NAME")  # ganti kalau nama file utama kamu berbeda
+MODULE_NAME = os.environ.get("MODULE_NAME")
 rag = __import__(MODULE_NAME)
 
 _LEAK_MARKERS = [

@@ -1,11 +1,3 @@
-# Modelfile untuk model "Minci" di Ollama
-# Cara pakai:
-#   1. Taruh file .gguf hasil download dari Colab di folder yang sama dengan Modelfile ini,
-#      lalu ganti nama filenya jadi: minci-llama3.2-3b-q4_k_m.gguf
-#      (atau sesuaikan nama file di baris FROM di bawah)
-#   2. Jalankan: ollama create minci -f Modelfile
-#   3. Test: ollama run minci
-
 FROM ./llama-3.2-3b-instruct.Q4_K_M.gguf
 
 TEMPLATE """{{ if .System }}<|start_header_id|>system<|end_header_id|>

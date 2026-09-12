@@ -10,7 +10,6 @@ import sys
 import json
 import logging
 
-# Disable ChromaDB telemetry before importing the library.
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 import chromadb
@@ -31,20 +30,12 @@ MAX_DISTANCE = 0.60
 MIN_OVERLAP_IF_LONG_QUERY = 1  
 DEBUG = True
 
-# ============================================================
-# TEXT PROCESSING CONFIGURATION
-# ============================================================
-
 _STOPWORDS = {
     "yang", "dan", "atau", "di", "ke", "dari", "untuk", "dengan",
     "ini", "itu", "ada", "apa", "apakah", "bagaimana", "berapa",
     "kapan", "dimana", "mana", "saja", "aja", "adalah", "pada", "min",
     "nya", "sih", "siapa", "kamu", "anda", "kak", "kakak",
 }
-
-# ============================================================
-# CHITCHAT DETECTION (basa-basi → skip RAG)
-# ============================================================
 
 CHITCHAT_PATH = os.path.join(BASE_DIR, "..", "dataset", "chitchat.json")
 
@@ -118,10 +109,6 @@ KATA KUNCI LARANGAN KERAS:
 - JANGAN mengarang atau memberikan informasi akademik palsu di sini!
 """
 
-# ============================================================
-# RETRIEVAL HELPERS
-# ============================================================
-
 def meaningful_tokens(text: str) -> set[str]:
     return {
         w for w in re.findall(r"[a-z0-9]+", text.lower())
@@ -159,10 +146,6 @@ def get_collection():
     return client.get_or_create_collection(
         COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
     )
-
-# ============================================================
-# DOCUMENT RETRIEVAL
-# ============================================================
 
 def retrieve_with_debug(question: str) -> list[dict]:
     print(f"\n{'='*50}")
@@ -243,10 +226,6 @@ def retrieve_with_debug(question: str) -> list[dict]:
     
     return final_chunks
 
-# ============================================================
-# LLM PROMPTS
-# ============================================================
-
 SYSTEM_PROMPT = """Kamu adalah asisten akademik yang menjawab pertanyaan tentang PMB, KRS, Jadwal dan Biaya. Gaya bicaramu Generasi Z, ramah, dan ceria.
 
 CONTEXT di bawah ini SUDAH DIPASTIKAN BERISI DATA PANDUAN YANG RELEVAN dengan pertanyaan.
@@ -268,10 +247,6 @@ ATURAN WAJIB UNTUK SEMUA JAWABAN:
 - JANGAN menyebut nama dokumen, seperti: "informasi ini ada di dokumen BIAYA".
 - JANGAN menyebut tempat informasi berada, seperti "informasi ini ada di tabel biaya".
 """
-
-# ============================================================
-# CONTEXT AND CHAT API
-# ============================================================
 
 FALLBACK_TEXT = (
     "Maaf kak, informasi yang kakak tanyakan tidak ada di panduan kami, "
@@ -331,10 +306,6 @@ def ask(question: str) -> str:
         return FALLBACK_TEXT
 
     return answer_with_context(question, chunks)
-
-# ============================================================
-# INTERACTIVE TERMINAL MODE
-# ============================================================
 
 def run_terminal_chat() -> None:
     print("\n" + "="*50)

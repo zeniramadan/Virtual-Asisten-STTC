@@ -23,11 +23,6 @@ DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
 COLLECTION_NAME = "obsidian_vault"
 EMBED_MODEL = "bge-m3"
 
-# Setiap heading (level 1-6, "#" sampai "######") jadi BATAS chunk sendiri.
-# Isi di bawah H1 masuk chunk H1, isi di bawah H2 masuk chunk H2 (terpisah
-# dari H1), isi di bawah H3 masuk chunk H3 (terpisah dari H2), dst. Kalau ada
-# heading tanpa isi langsung di bawahnya (mis. H1 yang cuma dipakai sebagai
-# judul), chunk itu jadi "yatim" (cuma heading doang) -- itu memang disengaja.
 _HEADING_SPLIT_LEVEL = 6
 _HEADING_LINE_RE = rf"(?m)^(#{{1,{_HEADING_SPLIT_LEVEL}}}\s+.+)$"
 _HEADING_PREFIX_RE = rf"^(#{{1,{_HEADING_SPLIT_LEVEL}}}\s+.+)"
@@ -166,9 +161,6 @@ def reset_database() -> None:
                 )
                 time.sleep(1.5)
                 continue
-            # Ini BUKAN bug di ingest.py -- di Windows, file yang masih
-            # dibuka proses lain (chromadb.PersistentClient yang belum
-            # ditutup) tidak bisa dihapus (WinError 32), beda dengan Linux.
             print(
                 f"\n❌ Gagal menghapus '{DB_DIR}' karena masih dipakai proses lain:\n"
                 f"   {e}\n\n"
@@ -205,11 +197,9 @@ def index_vault(vault_dir: str, force: bool = False) -> None:
         mtime = os.path.getmtime(path)
 
         if not force and indexed_mtime.get(rel_path) == mtime:
-        # File tidak berubah, skip
             skipped += 1
             continue  
 
-        # Hapus chunk lama sebelum re-index
         collection.delete(where={"path": rel_path})
 
         frontmatter, body = parse_note(path)
@@ -224,13 +214,6 @@ def index_vault(vault_dir: str, force: bool = False) -> None:
 
         chunk_index = 0
         for section in sections:
-            # Tag dihitung SEKALI dari teks section PENUH (sebelum dipecah
-            # max_chars), lalu dipakai SAMA RATA untuk semua sub-chunk hasil
-            # pecahan section ini. Ini menghindari bug lama: kalau dihitung
-            # ulang per sub-chunk (yang sekarang semuanya mengulang baris
-            # heading yang sama), tag inline yang cuma muncul di satu paragraf
-            # bisa ke-timpa jadi kosong oleh sub-chunk lain yang tidak punya
-            # tag di teksnya.
             section_tags = normalize_tags(note_tags + extract_inline_tags(section))
 
             for chunk_text in split_section_into_chunks(section):

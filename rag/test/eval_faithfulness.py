@@ -34,19 +34,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 dotenv_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
 load_dotenv(dotenv_path=dotenv_path)
 
-MODULE_NAME = os.environ.get("MODULE_NAME") # ganti kalau nama file utama kamu berbeda
+MODULE_NAME = os.environ.get("MODULE_NAME")
 rag = __import__(MODULE_NAME)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-# Nama model versi eksplisit, BUKAN alias "-latest" -- alias semacam itu
-# kadang ditolak generateContent ("unexpected model name format") atau
-# diam-diam berpindah backing model.
-DEFAULT_JUDGE_MODEL = "gemini-3.5-flash-lite"  # bisa diganti ke versi lain, mis. gemini-2.5-flash-lite
+DEFAULT_JUDGE_MODEL = "gemini-3.5-flash-lite"
 
-# Free tier Gemini API cuma ~5 request/menit untuk model flash -- default
-# di bawah ini dibuat konservatif supaya tidak terus kena 429
-# RESOURCE_EXHAUSTED. Kalau pakai tier berbayar, kecilkan lewat --request-delay.
 DEFAULT_REQUEST_DELAY_SECONDS = 13
 MAX_RETRIES = 4
 
@@ -131,7 +125,6 @@ def generate_with_context(question: str) -> tuple[str, str]:
 
 def faithfulness_score(context: str, answer: str, judge_model: str) -> tuple[float, list[dict]]:
     if not context.strip() or answer.strip() == rag.FALLBACK_TEXT:
-        # Tidak ada context untuk dinilai (fallback/chitchat) -> tidak relevan
         return 1.0, []
 
     prompt = JUDGE_PROMPT.format(context=context, answer=answer)

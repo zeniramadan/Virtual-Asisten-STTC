@@ -20,10 +20,8 @@ import requests
 from fastapi import FastAPI, Request, Response, BackgroundTasks
 from dotenv import load_dotenv
 
-# webhook/ dan rag/ adalah folder TERPISAH (sejajar), jadi perlu ditambahkan
-# ke sys.path dulu supaya query.py di folder rag/ bisa diimport dari sini
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rag"))
-from main import ask as ask_minci  # noqa: E402
+from main import ask as ask_minci
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, ".env"))
@@ -33,45 +31,21 @@ logger = logging.getLogger("minci-webhook")
 
 app = FastAPI(title="Minci WhatsApp Webhook")
 
-# ====== KONFIGURASI dari .env ======
 WA_VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN", "minci-verify-token")
-WA_ACCESS_TOKEN = os.getenv("WA_ACCESS_TOKEN")          # token akses WhatsApp Cloud API
-WA_PHONE_NUMBER_ID = os.getenv("WA_PHONE_NUMBER_ID")     # phone_number_id dari Meta App
+WA_ACCESS_TOKEN = os.getenv("WA_ACCESS_TOKEN")
+WA_PHONE_NUMBER_ID = os.getenv("WA_PHONE_NUMBER_ID")
 WA_API_VERSION = os.getenv("WA_API_VERSION", "v26.0")
-# ====================================
 
 WA_SEND_URL = f"https://graph.facebook.com/{WA_API_VERSION}/{WA_PHONE_NUMBER_ID}/messages"
 
-# query.py yang baru punya jalur cepat untuk chitchat (is_chitchat) yang tetap
-# lewat LLM tapi tanpa retrieval, sedangkan pertanyaan akademik tetap lewat
-# proses RAG penuh (embedding + cari dokumen + generate jawaban LLM) yang bisa
-# makan waktu 10-20+ detik di model 3B CPU. Timeout ini adalah pengaman AGAR
-# koneksi ke WhatsApp API tidak menahan thread background selamanya kalau Meta
-# lagi lemot, bukan timeout untuk proses RAG-nya sendiri.
 WA_SEND_TIMEOUT_SECONDS = 30
 
-# ============================================================
-# DEDUPLIKASI PESAN: cegah jawaban dobel kalau Meta retry webhook
-# ============================================================
-# WhatsApp Cloud API akan RETRY (kirim ulang) notifikasi webhook kalau server kita
-# tidak segera balas 200 OK (biasanya timeout beberapa detik). Karena proses RAG
-# (embedding + cari dokumen + generate jawaban LLM) bisa makan waktu 10-20+ detik
-# di model 3B CPU, Meta seringkali sudah keburu retry SEBELUM kita selesai proses
-# -- akibatnya pesan yang SAMA diproses berkali-kali, jawaban dikirim berkali-kali.
-#
-# Solusinya DUA LAPIS:
-# 1. Balas 200 OK ke Meta SECEPATNYA (sebelum proses RAG), proses beneran jalan
-#    di BACKGROUND (lihat BackgroundTasks di bawah) -- ini FIX UTAMA.
-# 2. Simpan ID pesan yang sudah diproses, supaya walau Meta TETAP retry (datang
-#    lagi notifikasi untuk pesan yang sama), kita skip -- tidak diproses ulang.
-#    Ini jaring pengaman KEDUA, bukan solusi utama.
 _processed_message_ids: dict[str, float] = {}
-DEDUP_WINDOW_SECONDS = 300  # anggap ID pesan "sudah pernah diproses" selama 5 menit
+DEDUP_WINDOW_SECONDS = 300
 
 
 def _is_duplicate(message_id: str) -> bool:
     now = time.time()
-    # Beres-beres ID lama supaya dict tidak membengkak tanpa batas
     expired = [mid for mid, ts in _processed_message_ids.items() if now - ts > DEDUP_WINDOW_SECONDS]
     for mid in expired:
         del _processed_message_ids[mid]
@@ -119,17 +93,14 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
         changes = entry["changes"][0]
         value = changes["value"]
 
-        # Kalau ini cuma notifikasi status (delivered/read), bukan pesan baru -> abaikan
         if "messages" not in value:
             return {"status": "ok"}
 
         message = value["messages"][0]
         message_id = message.get("id")
-        from_number = message["from"]  # nomor WA pengirim
+        from_number = message["from"]
         msg_type = message.get("type")
 
-        # Cek duplikasi SEBELUM diproses -- kalau ID ini sudah pernah masuk
-        # (Meta retry), skip total, jangan proses/balas lagi.
         if message_id and _is_duplicate(message_id):
             logger.info(f"Pesan {message_id} dari {from_number} adalah DUPLIKAT (retry Meta), di-skip.")
             return {"status": "ok"}
@@ -143,8 +114,6 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
         else:
             user_text = message["text"]["body"]
             logger.info(f"Pesan dari {from_number}: {user_text}")
-            # Proses RAG (lambat) + kirim balasan dijadwalkan di BACKGROUND,
-            # supaya endpoint ini bisa langsung return 200 OK ke Meta tanpa nunggu.
             background_tasks.add_task(process_and_reply, from_number, user_text)
 
     except (KeyError, IndexError) as e:
@@ -163,13 +132,6 @@ def process_and_reply(from_number: str, user_text: str):
         send_whatsapp_message(to=from_number, text=reply_text, user_text=user_text)
     except Exception as e:
         logger.error(f"Gagal memproses/membalas pesan dari {from_number}: {e}")
-        # Percobaan kedua ini (kirim pesan error ke user) juga bisa gagal --
-        # mis. kalau penyebab error di atas justru koneksi ke WhatsApp API
-        # (timeout/down), maka percobaan kirim pesan error ini kemungkinan
-        # besar akan gagal juga dengan sebab yang sama. Dibungkus try/except
-        # terpisah supaya kegagalan ini TERCATAT DI LOG, bukan cuma diam --
-        # tanpa ini, exception di sini akan jadi unhandled exception di dalam
-        # background thread dan user tidak dapat balasan apapun tanpa jejak log.
         try:
             send_whatsapp_message(
                 to=from_number,

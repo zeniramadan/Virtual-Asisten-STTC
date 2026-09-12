@@ -13,7 +13,6 @@ import chromadb
 
 logging.getLogger("chromadb.telemetry.product.posthog").disabled = True
 
-# Tentukan direktori database ChromaDB yang digunakan
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHROMA_DB_DIR = os.path.join(BASE_DIR, "chroma_db")
 COLLECTION_NAME = "obsidian_vault"
@@ -24,7 +23,6 @@ def inspect_chroma_db():
         print("Pastikan Anda sudah menjalankan proses indexing sebelumnya.")
         return
 
-    # Inisialisasi client ChromaDB
     client = chromadb.PersistentClient(
         path=CHROMA_DB_DIR,
         settings=chromadb.config.Settings(anonymized_telemetry=False),
@@ -46,7 +44,6 @@ def inspect_chroma_db():
         print("⚠️ Database kosong, belum ada dokumen yang di-index.")
         return
 
-    # Ambil seluruh data (documents, metadatas, ids) dari collection
     data = collection.get(include=["documents", "metadatas"])
     ids = data.get("ids", [])
     documents = data.get("documents", [])
@@ -60,7 +57,6 @@ def inspect_chroma_db():
             print(f"    🔖 Tags      : {meta.get('tags', 'N/A')}")
         print(f"    📄 Isi Teks  :")
         print("-" * 50)
-        # Tampilkan isi teks chunk (batasi jika terlalu panjang agar rapi di terminal)
         formatted_doc = doc.strip().replace("\n", "\n    ")
         print(f"    {formatted_doc}")
         print("-" * 50)
