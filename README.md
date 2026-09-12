@@ -379,30 +379,30 @@ Panduan metrik dan interpretasi tersedia di [rag/test/GUIDE.md](rag/test/GUIDE.m
 
 ## Dataset dan Training
 
-| File                              | Peran                                                                                                 |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `dataset/chitchat.json`           | Daftar frasa greeting, smalltalk, terima kasih, dan percakapan ringan yang dipakai detektor chitchat. |
-| `dataset/dataset_finetuning.json` | Pasangan instruction, input, dan output untuk contoh fine-tuning.                                     |
-| `dataset/dataset_minci.json`      | Contoh percakapan Minci dengan context dan jawaban.                                                   |
-| `dataset/ground_truth.json`       | Pertanyaan dengan target judul note untuk evaluasi retrieval dan faithfulness.                        |
-| `dataset/stress_cases.json`       | Kasus out-of-context, ambigu, prompt injection, dan jailbreak.                                        |
-| `pertanyaan.md`                   | Kumpulan pertanyaan manual dan ekspektasi jawaban, termasuk kasus fallback.                           |
+| File                              | Peran                                                                                                                                   |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `dataset/chitchat.json`           | Daftar frasa greeting, smalltalk, terima kasih, dan percakapan ringan yang dipakai detektor chitchat.                                   |
+| `dataset/dataset_finetuning.json` | Pasangan instruction, input, dan output untuk contoh fine-tuning.                                                                       |
+| `dataset/dataset_minci.json`      | Contoh percakapan Minci dengan context dan jawaban.                                                                                     |
+| `dataset/ground_truth.json`       | Pertanyaan dengan target judul note untuk evaluasi retrieval dan faithfulness.                                                          |
+| `dataset/stress_cases.json`       | Kasus out-of-context, ambigu, prompt injection, dan jailbreak.                                                                          |
+| `pertanyaan.md`                   | Kumpulan pertanyaan manual dan ekspektasi jawaban, termasuk kasus fallback.                                                             |
 | `training/model_training.ipynb`   | Notebook fine-tuning LoRA di Google Colab menggunakan Unsloth, PyTorch, TRL, PEFT, Accelerate, BitsAndBytes, dan Hugging Face Datasets. |
 
 ### Library dan Alur Fine-tuning
 
 Notebook `training/model_training.ipynb` bukan bagian dari runtime RAG harian. Notebook tersebut digunakan untuk melatih gaya respons model Minci di GPU Google Colab, terutama GPU T4:
 
-| Komponen | Peran |
-| --- | --- |
-| `torch` | Backend tensor dan deteksi dukungan `fp16`/`bf16`. |
-| `unsloth` | Memuat Llama 3.2 3B 4-bit, memasang LoRA, inference, dan export GGUF. |
-| `trl` | `SFTTrainer` dan `SFTConfig` untuk supervised fine-tuning. |
-| `peft` | Adapter LoRA untuk fine-tuning parameter-efficient. |
-| `accelerate` | Dukungan eksekusi training pada GPU. |
-| `bitsandbytes` | Optimizer 8-bit `adamw_8bit` dan model quantization. |
-| `datasets` | Mengubah JSON instruction dataset menjadi Hugging Face Dataset. |
-| `google.colab.files` | Upload dataset dan download file GGUF dari Google Colab. |
+| Komponen             | Peran                                                                 |
+| -------------------- | --------------------------------------------------------------------- |
+| `torch`              | Backend tensor dan deteksi dukungan `fp16`/`bf16`.                    |
+| `unsloth`            | Memuat Llama 3.2 3B 4-bit, memasang LoRA, inference, dan export GGUF. |
+| `trl`                | `SFTTrainer` dan `SFTConfig` untuk supervised fine-tuning.            |
+| `peft`               | Adapter LoRA untuk fine-tuning parameter-efficient.                   |
+| `accelerate`         | Dukungan eksekusi training pada GPU.                                  |
+| `bitsandbytes`       | Optimizer 8-bit `adamw_8bit` dan model quantization.                  |
+| `datasets`           | Mengubah JSON instruction dataset menjadi Hugging Face Dataset.       |
+| `google.colab.files` | Upload dataset dan download file GGUF dari Google Colab.              |
 
 Alur notebook:
 
