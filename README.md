@@ -138,8 +138,6 @@ Virtual-Asisten-STTC/
 ├── webhook/
 │   └── app.py                     # FastAPI WhatsApp webhook
 ├── env.example                    # Template credential WhatsApp
-├── pertanyaan.md                  # Daftar pertanyaan dan ekspektasi jawaban
-├── webhook.txt                    # Catatan command webhook lama
 ├── requirements.txt               # Dependency runtime utama
 └── README.md
 ```
@@ -384,7 +382,6 @@ Panduan metrik dan interpretasi tersedia di [rag/test/GUIDE.md](rag/test/GUIDE.m
 | `dataset/dataset_minci.json`      | Contoh percakapan Minci dengan context dan jawaban.                                                                                     |
 | `dataset/ground_truth.json`       | Pertanyaan dengan target judul note untuk evaluasi retrieval dan faithfulness.                                                          |
 | `dataset/stress_cases.json`       | Kasus out-of-context, ambigu, prompt injection, dan jailbreak.                                                                          |
-| `pertanyaan.md`                   | Kumpulan pertanyaan manual dan ekspektasi jawaban, termasuk kasus fallback.                                                             |
 | `training/model_training.ipynb`   | Notebook fine-tuning LoRA di Google Colab menggunakan Unsloth, PyTorch, TRL, PEFT, Accelerate, BitsAndBytes, dan Hugging Face Datasets. |
 
 ### Library dan Alur Fine-tuning
@@ -484,7 +481,6 @@ Periksa access token, phone number ID, versi Graph API, log server, koneksi Olla
 - [Dependency runtime](requirements.txt)
 - [Environment template](env.example)
 - [Panduan evaluasi](rag/test/GUIDE.md)
-- [Pertanyaan manual](pertanyaan.md)
 
 ## Lisensi
 
