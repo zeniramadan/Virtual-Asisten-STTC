@@ -20,7 +20,7 @@
 </div>
 
 <div style="border-left: 4px solid #0ea5e9; padding: 12px 16px; margin: 20px 0; background: #f0f9ff;">
-<strong>Ringkasnya:</strong> Minci mengambil jawaban dari catatan akademik lokal, bukan dari internet. Dokumen diindeks menjadi chunk Markdown, dicari dengan embedding, lalu diringkas oleh model Ollama lokal. Sistem dapat digunakan dari terminal atau menerima pesan teks WhatsApp.
+<strong>Minci itu apa?</strong> Minci adalah asisten virtual akademik STT Cipasung yang membantu mahasiswa dan calon mahasiswa mencari informasi PMB, KRS, biaya kuliah, kalender akademik, program studi, beasiswa, dan layanan kampus. Minci menjawab berdasarkan dokumen resmi lokal melalui RAG dan model bahasa Ollama, serta dapat diakses dari terminal atau WhatsApp.
 </div>
 
 ## Navigasi
@@ -57,7 +57,7 @@ Informasi yang tidak ada di catatan akan menghasilkan jawaban fallback. Sistem t
 <td width="50%"><h3>Conversation</h3><ul><li>Deteksi chitchat dari <code>dataset/chitchat.json</code>.</li><li>Chitchat melewati retrieval dan tetap dijawab model lokal.</li><li>Fallback untuk konteks kosong.</li><li>Prompt injection ditolak sebelum retrieval.</li><li>Jawaban mengikuti gaya bahasa Minci yang ramah.</li></ul></td>
 </tr>
 <tr>
-<td><h3>Integrasi</h3><ul><li>Chat interaktif melalui terminal.</li><li>FastAPI webhook untuk WhatsApp Cloud API.</li><li>Background task agar webhook segera membalas HTTP 200.</li><li>Deduplikasi message ID selama 5 menit.</li><li>Cloudflare Tunnel atau tunnel HTTPS lain untuk development.</li></ul></td>
+<td><h3>Integrasi</h3><ul><li>Chat interaktif melalui terminal.</li><li>FastAPI webhook untuk WhatsApp Cloud API.</li><li>Background task agar webhook segera membalas HTTP 200.</li><li>Deduplikasi message ID selama 5 menit.</li><li>Ngrok untuk expose webhook saat development.</li></ul></td>
 <td><h3>Quality Checks</h3><ul><li>Hit Rate@k, Precision@k, Recall@k, dan NDCG@k.</li><li>Faithfulness scoring dengan judge Gemini.</li><li>Stress test untuk fallback dan prompt injection.</li><li>Inspector untuk melihat seluruh isi collection ChromaDB.</li></ul></td>
 </tr>
 </table>
@@ -157,7 +157,7 @@ Virtual-Asisten-STTC/
 - Model embedding `bge-m3`.
 - Model chat `minci`, dibuat dari GGUF lokal di folder `llm/`.
 - Meta Developer App dan kredensial WhatsApp jika webhook akan digunakan.
-- Cloudflare Tunnel, ngrok, atau tunnel HTTPS lain untuk menerima callback Meta dari internet.
+- Ngrok untuk menerima callback Meta dari internet saat development.
 - `google-genai` dan `GEMINI_API_KEY` hanya untuk evaluasi faithfulness.
 
 Install Ollama dari [ollama.com/download](https://ollama.com/download).
@@ -309,13 +309,13 @@ Health check lokal:
 http://localhost:8000/
 ```
 
-Expose dengan tunnel development:
+Expose dengan ngrok:
 
 ```powershell
-cloudflared tunnel --url http://localhost:8000
+ngrok http 8000
 ```
 
-Gunakan URL publik dengan suffix `/webhook` sebagai callback URL Meta, lalu subscribe ke field `messages`.
+Gunakan URL HTTPS publik dari ngrok dengan suffix `/webhook` sebagai callback URL Meta, lalu subscribe ke field `messages`.
 
 ### Perilaku webhook
 
@@ -387,7 +387,35 @@ Panduan metrik dan interpretasi tersedia di [rag/test/GUIDE.md](rag/test/GUIDE.m
 | `dataset/ground_truth.json`       | Pertanyaan dengan target judul note untuk evaluasi retrieval dan faithfulness.                        |
 | `dataset/stress_cases.json`       | Kasus out-of-context, ambigu, prompt injection, dan jailbreak.                                        |
 | `pertanyaan.md`                   | Kumpulan pertanyaan manual dan ekspektasi jawaban, termasuk kasus fallback.                           |
-| `training/model_training.ipynb`   | Notebook training/fine-tuning model. Jalankan melalui Jupyter atau VS Code Notebook.                  |
+| `training/model_training.ipynb`   | Notebook fine-tuning LoRA di Google Colab menggunakan Unsloth, PyTorch, TRL, PEFT, Accelerate, BitsAndBytes, dan Hugging Face Datasets. |
+
+### Library dan Alur Fine-tuning
+
+Notebook `training/model_training.ipynb` bukan bagian dari runtime RAG harian. Notebook tersebut digunakan untuk melatih gaya respons model Minci di GPU Google Colab, terutama GPU T4:
+
+| Komponen | Peran |
+| --- | --- |
+| `torch` | Backend tensor dan deteksi dukungan `fp16`/`bf16`. |
+| `unsloth` | Memuat Llama 3.2 3B 4-bit, memasang LoRA, inference, dan export GGUF. |
+| `trl` | `SFTTrainer` dan `SFTConfig` untuk supervised fine-tuning. |
+| `peft` | Adapter LoRA untuk fine-tuning parameter-efficient. |
+| `accelerate` | Dukungan eksekusi training pada GPU. |
+| `bitsandbytes` | Optimizer 8-bit `adamw_8bit` dan model quantization. |
+| `datasets` | Mengubah JSON instruction dataset menjadi Hugging Face Dataset. |
+| `google.colab.files` | Upload dataset dan download file GGUF dari Google Colab. |
+
+Alur notebook:
+
+1. Install Unsloth serta library training pendukung.
+2. Memuat base model `unsloth/Llama-3.2-3B-Instruct` dalam 4-bit.
+3. Memasang adapter LoRA pada modul attention dan MLP.
+4. Mengunggah dataset JSON dengan format `instruction`, `input`, dan `output`.
+5. Mengubah data menjadi chat template Llama dengan system prompt persona Minci.
+6. Melatih menggunakan `SFTTrainer` selama 3 epoch dengan cosine scheduler.
+7. Menguji respons KRS secara singkat.
+8. Mengekspor hasil ke GGUF quantization `q4_k_m` untuk digunakan oleh Ollama.
+
+Library training tersebut perlu dipasang di environment notebook/Google Colab, bukan ditambahkan ke `requirements.txt` runtime utama.
 
 ## Troubleshooting
 
