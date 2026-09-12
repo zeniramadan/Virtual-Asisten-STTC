@@ -13,7 +13,7 @@
 <img src="https://img.shields.io/badge/RAG-Active-0EA5E9?style=flat-square" alt="RAG active">
 <img src="https://img.shields.io/badge/Embedding-bge--m3-F59E0B?style=flat-square" alt="bge-m3 embedding">
 <img src="https://img.shields.io/badge/Chat%20model-minci-7C3AED?style=flat-square" alt="Minci chat model">
-<img src="https://img.shields.io/badge/License-Not%20specified-6B7280?style=flat-square" alt="License not specified">
+<a href="https://github.com/zeniramadan/Virtual-Asisten-STTC/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-6B7280?style=flat-square" alt="MIT License"></a>
 
 </div>
 <br>
@@ -487,5 +487,7 @@ Periksa access token, phone number ID, versi Graph API, log server, koneksi Olla
 - [Pertanyaan manual](pertanyaan.md)
 
 ## Lisensi
+
+Proyek ini dilisensikan di bawah [MIT License](https://github.com/zeniramadan/Virtual-Asisten-STTC/blob/main/LICENSE).
 
 Lisensi proyek belum ditentukan.
