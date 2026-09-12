@@ -489,5 +489,3 @@ Periksa access token, phone number ID, versi Graph API, log server, koneksi Olla
 ## Lisensi
 
 Proyek ini dilisensikan di bawah [MIT License](https://github.com/zeniramadan/Virtual-Asisten-STTC/blob/main/LICENSE).
-
-Lisensi proyek belum ditentukan.
