@@ -17,13 +17,15 @@ import chromadb
 import ollama
 import yaml
 
+import config
+
 logging.getLogger("chromadb.telemetry.product.posthog").disabled = True
 
-DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
-COLLECTION_NAME = "obsidian_vault"
-EMBED_MODEL = "bge-m3"
+DB_DIR = config.DB_DIR
+COLLECTION_NAME = config.COLLECTION_NAME
+EMBED_MODEL = config.EMBED_MODEL
 
-_HEADING_SPLIT_LEVEL = 6
+_HEADING_SPLIT_LEVEL = config.HEADING_SPLIT_LEVEL
 _HEADING_LINE_RE = rf"(?m)^(#{{1,{_HEADING_SPLIT_LEVEL}}}\s+.+)$"
 _HEADING_PREFIX_RE = rf"^(#{{1,{_HEADING_SPLIT_LEVEL}}}\s+.+)"
 
@@ -78,7 +80,7 @@ def _split_oversized_paragraph(paragraph: str, max_chars: int) -> list[str]:
     return lines if len(lines) > 1 else [paragraph]
 
 
-def split_section_into_chunks(section: str, max_chars: int = 4000) -> list[str]:
+def split_section_into_chunks(section: str, max_chars: int = config.MAX_CHUNK_CHARS) -> list[str]:
     """Pecah SATU section jadi beberapa sub-chunk kalau kepanjangan. Heading
     section (kalau ada) diulang di SETIAP sub-chunk supaya konteksnya tidak
     hilang -- tanpa ini, heading gampang ke-flush sendirian jadi chunk
@@ -236,10 +238,9 @@ def index_vault(vault_dir: str, force: bool = False) -> None:
     print(f"\n📁 [SELESAI] {updated} note diperbarui, {skipped} note dilewati.")
 
 if __name__ == "__main__":
-    DEFAULT_VAULT = r"C:\Users\ZENI RAMADAN\Documents\Skripsi\Virtual-Asisten-STTC\documents"
     arguments = [argument for argument in sys.argv[1:] if argument != "--force"]
     force = "--force" in sys.argv[1:]
-    vault = arguments[0] if arguments else DEFAULT_VAULT
+    vault = arguments[0] if arguments else config.DEFAULT_VAULT
 
     if not os.path.exists(vault):
         print(f"Error: Folder vault '{vault}' tidak ditemukan!")
