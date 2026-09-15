@@ -16,6 +16,7 @@ import chromadb
 import ollama
 
 import config
+import history_store
 
 logging.getLogger("chromadb.telemetry.product.posthog").disabled = True
 
@@ -30,6 +31,7 @@ RETRIEVAL_K = config.RETRIEVAL_K
 FINAL_CONTEXT_K = config.FINAL_CONTEXT_K
 MAX_DISTANCE = config.MAX_DISTANCE
 MIN_OVERLAP_IF_LONG_QUERY = config.MIN_OVERLAP_IF_LONG_QUERY
+MAX_HISTORY_TURNS = config.MAX_HISTORY_TURNS
 DEBUG = config.DEBUG
 
 _STOPWORDS = config.STOPWORDS
@@ -80,6 +82,10 @@ def is_prompt_injection(question: str) -> bool:
 
 
 CHITCHAT_SYSTEM_PROMPT = config.CHITCHAT_SYSTEM_PROMPT
+CONDENSE_SYSTEM_PROMPT = config.CONDENSE_SYSTEM_PROMPT
+
+# Satu riwayat percakapan = list of {"role": "user"|"assistant", "content": str}
+ChatHistory = history_store.ChatHistory
 
 def meaningful_tokens(text: str) -> set[str]:
     return {
@@ -224,56 +230,118 @@ def chat_with_model(system_prompt: str, user_prompt: str, **options) -> str:
     return response.get("message", {}).get("content", "").strip()
 
 
-def answer_chitchat(question: str) -> str:
+def format_history(history: ChatHistory | None, max_turns: int = MAX_HISTORY_TURNS) -> str:
+    """Ubah riwayat percakapan jadi teks 'Pengguna: ... / Minci: ...' buat prompt."""
+    if not history:
+        return ""
+    trimmed = history[-(max_turns * 2):]
+    lines = []
+    for turn in trimmed:
+        speaker = "Pengguna" if turn.get("role") == "user" else "Minci"
+        lines.append(f"{speaker}: {turn.get('content', '')}")
+    return "\n".join(lines)
+
+
+def condense_question(question: str, history: ChatHistory | None) -> str:
+    """Tulis ulang pertanyaan lanjutan jadi pertanyaan mandiri berdasarkan
+    riwayat percakapan, mirip CondensePlusContextChatEngine di LlamaIndex.
+    Ini yang bikin retrieval tetap nyambung walau user cuma nanya
+    'kalau yang itu gimana?' tanpa nyebut ulang topiknya."""
+    if not history:
+        return question
+
+    history_text = format_history(history)
+    prompt = f"RIWAYAT PERCAKAPAN:\n{history_text}\n\nPERTANYAAN LANJUTAN:\n{question}"
+    condensed = chat_with_model(
+        CONDENSE_SYSTEM_PROMPT,
+        prompt,
+        temperature=0.0,
+        num_predict=120,
+    )
+    condensed = condensed.strip().strip('"').strip()
+
+    if DEBUG:
+        print(f"🔁 [DEBUG] Pertanyaan asli: \"{question}\"")
+        print(f"🔁 [DEBUG] Pertanyaan mandiri: \"{condensed or question}\"")
+
+    return condensed or question
+
+
+def answer_chitchat(question: str, history: ChatHistory | None = None) -> str:
+    history_block = f"RIWAYAT PERCAKAPAN SEBELUMNYA:\n{format_history(history)}\n\n" if history else ""
     return chat_with_model(
         CHITCHAT_SYSTEM_PROMPT,
-        question,
+        f"{history_block}PERTANYAAN:\n{question}",
         temperature=0.4,
         num_predict=100,
     )
 
 
-def answer_with_context(question: str, chunks: list[dict]) -> str:
+def answer_with_context(question: str, chunks: list[dict], history: ChatHistory | None = None) -> str:
     context = build_context(chunks)
+    history_block = f"RIWAYAT PERCAKAPAN SEBELUMNYA:\n{format_history(history)}\n\n" if history else ""
     return chat_with_model(
         SYSTEM_PROMPT,
-        f"CONTEXT:\n{context}\n\nPERTANYAAN:\n{question}",
+        f"{history_block}CONTEXT:\n{context}\n\nPERTANYAAN:\n{question}",
         temperature=0.1,
     )
 
 
-def ask(question: str) -> str:
+def ask(question: str, history: ChatHistory | None = None) -> str:
+    """Jawab satu pertanyaan dengan mempertimbangkan riwayat percakapan
+    (kalau ada). `history` dikelola di luar (mis. per-sesi di webhook/terminal),
+    fungsi ini tidak mengubahnya, cuma membaca."""
     if is_prompt_injection(question):
         return FALLBACK_TEXT
 
     if is_chitchat(question):
-        return answer_chitchat(question)
+        return answer_chitchat(question, history)
 
-    chunks = retrieve_with_debug(question)
+    # Tulis ulang pertanyaan lanjutan jadi mandiri dulu SEBELUM retrieval,
+    # supaya embedding search tetap kena topik yang benar.
+    standalone_question = condense_question(question, history)
+
+    chunks = retrieve_with_debug(standalone_question)
 
     if not chunks:
         return FALLBACK_TEXT
 
-    return answer_with_context(question, chunks)
+    return answer_with_context(question, chunks, history)
 
-def run_terminal_chat() -> None:
+def run_terminal_chat(session_id: str = "terminal") -> None:
+    history_store.init_db()
+
     print("\n" + "="*50)
     print("🤖 Minci Siap!")
     print("Ketik 'exit' atau 'quit' untuk keluar.")
+    print("Ketik 'reset' untuk menghapus riwayat percakapan.")
     print("="*50 + "\n")
+
+    history = history_store.load_history(session_id)
+    if history:
+        print(f"📜 Melanjutkan percakapan sebelumnya ({len(history) // 2} pertukaran terakhir tersimpan).\n")
 
     while True:
         try:
             question = input("Kamu: ").strip()
             if question.lower() in {"exit", "quit"}:
                 break
+            if question.lower() in {"reset", "/reset"}:
+                history_store.reset_history(session_id)
+                history = []
+                print("🔄 Riwayat percakapan direset.\n")
+                continue
             if not question:
                 continue
-            
+
             print("Minci sedang menganalisis catatan...")
-            answer = ask(question)
+            answer = ask(question, history)
             print(f"Kamu: {question}")
             print(f"Minci: {answer}\n")
+
+            history_store.append_turn(session_id, question, answer)
+            history_store.prune_old_messages(session_id)
+            history = history_store.load_history(session_id)
         except KeyboardInterrupt:
             break
 

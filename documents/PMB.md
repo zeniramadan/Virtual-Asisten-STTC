@@ -53,7 +53,7 @@ tags:
 ---
 ## Persyaratan Administrasi Pendaftaran
 
-#stt-cipasung #pmb #pendaftaran-mahasiswa-baru #persyaratan-pendaftaran #dokumen-pendaftaran #cara-masuk #daftar  #mau #formulir-pendaftaran #biaya-pendaftaran #ijazah #skl #ktp #pas-foto #kartu-keluarga #akta-lahir
+#stt-cipasung #pmb #pendaftaran-mahasiswa-baru #persyaratan-pendaftaran #dokumen-pendaftaran #cara #cara-masuk #daftar  #mau #formulir-pendaftaran #biaya-pendaftaran #ijazah #skl #ktp #pas-foto #kartu-keluarga #akta-lahir
 
 - Mengisi formulir pendaftaran - Online: s.id/pmbsttc
 - Membayar biaya pendaftaran
