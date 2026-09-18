@@ -1,7 +1,7 @@
 """
 Konfigurasi terpusat untuk indexing.py dan main.py.
-Semua nilai yang sebelumnya hardcoded di kedua skrip dipindah ke sini
-supaya gampang di-tuning tanpa bongkar-bongkar logic.
+Semua nilai yang bisa di-tuning ditaruh di sini supaya gampang diubah
+tanpa bongkar-bongkar logic.
 """
 
 from __future__ import annotations
@@ -20,27 +20,30 @@ COLLECTION_NAME = "obsidian_vault"
 EMBED_MODEL = "bge-m3"
 CHAT_MODEL = "minci"
 
-# ── Chunking (indexing.py) ───────────────────────────────────────────────
-HEADING_SPLIT_LEVEL = 6      # heading level maksimal (#..######) yang dianggap pemisah section
-MAX_CHUNK_CHARS = 4000       # ukuran maksimal 1 sub-chunk sebelum dipecah lagi
+# ── Sumber dokumen & chunking (indexing.py) ─────────────────────────────
+# Format file yang didukung. Tambah handler barunya di read_document()
+# kalau mau dukung format lain (pdf, pptx, dst).
+SUPPORTED_EXTS = {".docx", ".txt", ".md"}
+
+# Chunking berbasis kalimat + overlap, meniru SentenceSplitter(chunk_size=512,
+# chunk_overlap=50) di LlamaIndex. Di sini satuannya karakter (bukan token)
+# supaya tidak butuh tokenizer tambahan -- kira-kira setara ~512 token
+# dan ~50 token overlap untuk teks Bahasa Indonesia.
+CHUNK_SIZE_CHARS = 1800
+CHUNK_OVERLAP_CHARS = 200
 
 # ── Retrieval (main.py) ──────────────────────────────────────────────────
-RETRIEVAL_K = 15                  # jumlah kandidat yang diambil dari ChromaDB
-FINAL_CONTEXT_K = 3               # jumlah chunk final yang dikirim ke LLM
-MAX_DISTANCE = 0.60               # ambang jarak cosine maksimal yang masih dianggap relevan
-MIN_OVERLAP_IF_LONG_QUERY = 1     # minimal overlap token kalau query >= 2 token bermakna
+# Retrieval polos: ambil TOP_K chunk paling mirip lewat vector similarity,
+# TANPA filter tambahan (distance threshold / token overlap / tag match).
+# Ini sengaja disamakan dengan retriever di notebook (similarity_top_k=3) --
+# semakin banyak lapisan filter manual, semakin besar risiko chunk yang
+# sebenarnya relevan malah kebuang sebelum sampai ke LLM.
+TOP_K = 3
 
 # ── Memory percakapan (multi-turn) ───────────────────────────────────────
 MAX_HISTORY_TURNS = 5   # jumlah pasangan (user, assistant) terakhir yang diingat
 
 DEBUG = True
-
-STOPWORDS = {
-    "yang", "dan", "atau", "di", "ke", "dari", "untuk", "dengan",
-    "ini", "itu", "ada", "apa", "apakah", "bagaimana", "berapa",
-    "kapan", "dimana", "mana", "saja", "aja", "adalah", "pada", "min",
-    "nya", "sih", "siapa", "kamu", "anda", "kak", "kakak",
-}
 
 # ── Prompt injection markers ─────────────────────────────────────────────
 INJECTION_MARKERS = (
@@ -63,7 +66,8 @@ ATURAN:
 - Balas HANYA dengan satu kalimat pertanyaan hasil tulis ulang. Tanpa penjelasan tambahan, tanpa tanda kutip, tanpa awalan seperti "Pertanyaan mandiri:".
 """
 
-CHITCHAT_SYSTEM_PROMPT = """Kamu adalah asisten akademik yang menjawab pertanyaan tentang PMB, KRS, Jadwal dan Biaya. Gaya bicaramu Generasi Z, ramah, dan ceria.
+CHITCHAT_SYSTEM_PROMPT = """Kamu adalah Minci, Admin STT Cipasung — asisten virtual yang membantu mahasiswa, dosen, dan staf seputar informasi PMB, KRS, Jadwal dan Biaya Kuliah.
+Ngobrollah dengan gaya yang hangat dan natural, seperti admin kampus yang ramah dan enak diajak tanya-tanya — bukan seperti robot yang kaku. Selalu sapa pengguna dengan 'kakak', JANGAN 'kamu'.
 
 TUGAS UTAMA:
 Jawab sapaan, salam, ucapan terima kasih, atau obrolan ringan (chitchat) dari pengguna dengan SINGKAT (maksimal 2 kalimat) dan super natural!
@@ -75,19 +79,20 @@ ATURAN BALASAN SESUAI KONTEKS:
 4. Jika pengguna BERTANYA HAL LAIN (seperti "lagi apa?", "kamu siapa?", "mau nanya"), jawab sesuai pertanyaan ringan mereka dengan gaya santai Gen-Z, lalu arahkan kembali agar mereka bertanya tentang PMB, KRS, atau biaya.
 
 KATA KUNCI LARANGAN KERAS:
-- HARUS menggunakan kata "kakak"!
-- DILARANG KERAS menggunakan kata "Kamu" atau "Anda" saat menyapa pengguna!
 - JANGAN PERNAH memberikan jawaban template "Sama-sama" jika pengguna tidak sedang berterima kasih!
 - JANGAN mengarang atau memberikan informasi akademik palsu di sini!
 """
 
-SYSTEM_PROMPT = """Kamu adalah Minci, asisten akademik virtual untuk pertanyaan seputar PMB, KRS, jadwal, dan biaya. Ngobrollah dengan gaya hangat, ramah, dan natural seperti admin kampus Gen-Z yang enak diajak tanya-tanya — bukan seperti robot kaku. Selalu sapa pengguna dengan "kakak", jangan "kamu"/"anda".
-
-Jawab HANYA berdasarkan CONTEXT di bawah ini. Kalau CONTEXT kosong atau isinya tidak benar-benar menjawab pertanyaan, jangan menjawab pakai pengetahuan umum kamu sendiri dan jangan menebak-nebak — akui dengan jujur bahwa informasinya belum ada, lalu arahkan untuk menghubungi bagian Tata Usaha.
-
+# Disederhanakan meniru context_prompt di notebook: singkat, positif, minim
+# larangan bertumpuk -- model lebih patuh dan lebih kecil kemungkinan halu
+# dibanding prompt panjang berisi banyak "JANGAN"/"DILARANG KERAS".
+SYSTEM_PROMPT = """Kamu adalah Minci, Admin STT Cipasung — asisten virtual yang membantu mahasiswa, dosen, dan staf seputar informasi PMB, KRS, Jadwal dan Biaya Kuliah.
+Ngobrollah dengan gaya yang hangat dan natural, seperti admin kampus yang ramah dan enak diajak tanya-tanya — bukan seperti robot yang kaku. Selalu sapa pengguna dengan 'kakak', JANGAN 'kamu'.
+Jawab pertanyaan HANYA berdasarkan dokumen konteks di bawah ini. Jika bagian "Dokumen terkait" kosong, atau isinya tidak benar-benar menjawab pertanyaan, JANGAN menjawab menggunakan pengetahuan umum kamu sendiri dan JANGAN menebak-nebak. Akui dengan jujur bahwa kamu belum punya informasi itu, lalu arahkan untuk menghubungi bagian Tata Usaha STT Cipasung langsung.
 Kalau CONTEXT berisi daftar (syarat, langkah, rincian biaya), tampilkan pakai bullet "-" biar mudah dibaca. Kalau ditanya soal pengisian KRS, sebutkan semua langkahnya secara lengkap tanpa ada yang terlewat.
-
 Sampaikan jawaban langsung ke intinya, seolah kamu memang tahu infonya sendiri — tanpa menyebut kata teknis seperti "context", "chunk", "metadata", atau menyebut nama dokumen/tabel sumbernya.
+Setelah menjawab pertanyaan, tawarkan lagi apakah ada pertanyaan tentang PMB, KRS, Jadwal, atau Biaya.
+Setelah menjawab, tutup dengan satu kalimat singkat yang menanyakan apakah ada hal lain yang ingin ditanyakan, dengan gaya yang bervariasi dan tidak template setiap kali, bukan mengulang kalimat yang sama persis di setiap jawaban.
 """
 
 FALLBACK_TEXT = (
@@ -95,5 +100,5 @@ FALLBACK_TEXT = (
     "coba bertanya lebih spesifik, atau silakan kakak hubungi bagian Tata Usaha ya!"
 )
 
-# ── Vault default (indexing.py) ──────────────────────────────────────────
-DEFAULT_VAULT = r"C:\Users\ZENI RAMADAN\Documents\Skripsi\Virtual-Asisten-STTC\documents"
+# ── Sumber dokumen default (indexing.py) ─────────────────────────────────
+DEFAULT_SOURCE_DIR = r"C:\Users\ZENI RAMADAN\Documents\Skripsi\Virtual-Asisten-STTC\documents"

@@ -1,6 +1,6 @@
 """
-Skrip khusus untuk Chat Interaktif & Retrieval RAG.
-Jalankan ini: python obsidian_rag.py
+Skrip chat interaktif & retrieval RAG.
+Jalankan ini: python main.py
 """
 
 from __future__ import annotations
@@ -27,14 +27,9 @@ COLLECTION_NAME = config.COLLECTION_NAME
 EMBED_MODEL = config.EMBED_MODEL
 CHAT_MODEL = config.CHAT_MODEL
 
-RETRIEVAL_K = config.RETRIEVAL_K
-FINAL_CONTEXT_K = config.FINAL_CONTEXT_K
-MAX_DISTANCE = config.MAX_DISTANCE
-MIN_OVERLAP_IF_LONG_QUERY = config.MIN_OVERLAP_IF_LONG_QUERY
+TOP_K = config.TOP_K
 MAX_HISTORY_TURNS = config.MAX_HISTORY_TURNS
 DEBUG = config.DEBUG
-
-_STOPWORDS = config.STOPWORDS
 
 CHITCHAT_PATH = config.CHITCHAT_PATH
 
@@ -83,37 +78,11 @@ def is_prompt_injection(question: str) -> bool:
 
 CHITCHAT_SYSTEM_PROMPT = config.CHITCHAT_SYSTEM_PROMPT
 CONDENSE_SYSTEM_PROMPT = config.CONDENSE_SYSTEM_PROMPT
+SYSTEM_PROMPT = config.SYSTEM_PROMPT
+FALLBACK_TEXT = config.FALLBACK_TEXT
 
 # Satu riwayat percakapan = list of {"role": "user"|"assistant", "content": str}
 ChatHistory = history_store.ChatHistory
-
-def meaningful_tokens(text: str) -> set[str]:
-    return {
-        w for w in re.findall(r"[a-z0-9]+", text.lower())
-        if len(w) >= 3 and w not in _STOPWORDS
-    }
-
-
-def tag_tokens(metadata: dict) -> set[str]:
-    """Ubah metadata tags menjadi token yang bisa dibandingkan dengan query."""
-    tags = metadata.get("tags", "")
-    return meaningful_tokens(tags.replace("-", " ").replace("_", " "))
-
-
-def exact_tag_matches(question: str, metadata: dict) -> set[str]:
-    """Cari tag utuh yang muncul sebagai frasa di dalam pertanyaan."""
-    question_text = re.sub(r"[^a-z0-9\s]", " ", question.lower())
-    question_text = " ".join(question_text.split())
-    tags = {
-        tag.strip().lower()
-        for tag in metadata.get("tags", "").split(",")
-        if tag.strip()
-    }
-    return {
-        tag
-        for tag in tags
-        if f" {tag.replace('-', ' ')} " in f" {question_text} "
-    }
 
 
 def get_collection():
@@ -125,88 +94,35 @@ def get_collection():
         COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
     )
 
-def retrieve_with_debug(question: str) -> list[dict]:
-    print(f"\n{'='*50}")
-    print(f"🔍 [DEBUG] Pertanyaan: \"{question}\"")
-    
-    q_tokens = meaningful_tokens(question)
-    print(f"🧩 [DEBUG] Token pertanyaan: {sorted(q_tokens)}")
-    print(f"{'='*50}")
+
+def retrieve(question: str) -> list[dict]:
+    """Ambil TOP_K chunk paling mirip lewat vector similarity -- POLOS,
+    tanpa filter tambahan (distance threshold / token overlap / tag match).
+    Sengaja disamakan dengan retriever di notebook (similarity_top_k=3):
+    makin sedikit lapisan filter manual, makin kecil risiko chunk yang
+    sebenarnya relevan malah kebuang sebelum sampai ke LLM."""
     collection = get_collection()
     embedding = ollama.embeddings(model=EMBED_MODEL, prompt=question)["embedding"]
-
-    results = collection.query(query_embeddings=[embedding], n_results=RETRIEVAL_K)
+    results = collection.query(query_embeddings=[embedding], n_results=TOP_K)
 
     documents = results.get("documents", [[]])[0]
     metadatas = results.get("metadatas", [[]])[0]
     distances = results.get("distances", [[]])[0]
 
-    candidates = []
-    for idx, (document, metadata, distance) in enumerate(zip(documents, metadatas, distances)):
-        distance = float(distance)
-        document_tokens = meaningful_tokens(document)
-        metadata_tags = tag_tokens(metadata or {})
-        document_overlap = sorted(q_tokens & document_tokens)
-        tag_overlap_tokens = sorted(q_tokens & metadata_tags)
-        overlap = len(document_overlap)
-        tag_overlap = len(tag_overlap_tokens)
-        exact_tags = exact_tag_matches(question, metadata or {})
-        
-        passed_distance = distance <= MAX_DISTANCE
-        passed_overlap = (len(q_tokens) < 2) or (overlap >= MIN_OVERLAP_IF_LONG_QUERY)
-        is_valid = passed_distance and passed_overlap
+    chunks = [
+        {"document": doc, "metadata": meta or {}, "distance": float(dist)}
+        for doc, meta, dist in zip(documents, metadatas, distances)
+    ]
 
-        status = "✅ LOLOS" if is_valid else "❌ DIBUANG"
-        title = metadata.get('title', '?')
-        print(
-            f"   [{idx+1}] Note: {title} | Jarak: {distance:.4f} | "
-            f"Overlap: {overlap} | Tag overlap: {tag_overlap} | Status: {status}"
-        )
-        print(f"       Kata isi yang cocok: {document_overlap or '-'}")
-        print(f"       Kata tag yang cocok: {tag_overlap_tokens or '-'}")
-        print(f"       Exact tag: {sorted(exact_tags) or '-'}")
+    if DEBUG:
+        print(f"\n🔍 [DEBUG] Pertanyaan: \"{question}\"")
+        for i, c in enumerate(chunks, 1):
+            title = c["metadata"].get("title", "?")
+            preview = " ".join(c["document"].split())[:150]
+            print(f"   [{i}] {title} | jarak={c['distance']:.4f} | {preview}...")
+        print()
 
-        if not is_valid:
-            continue
-
-        candidates.append({
-            "document": document,
-            "metadata": metadata,
-            "distance": distance,
-            "overlap": overlap,
-            "tag_overlap": tag_overlap,
-            "exact_tags": exact_tags,
-        })
-
-    exact_tag_candidates = [candidate for candidate in candidates if candidate["exact_tags"]]
-    if exact_tag_candidates:
-        candidates = exact_tag_candidates
-
-    candidates.sort(
-        key=lambda c: (
-            -len(c["exact_tags"]),
-            c["distance"],
-            -c["tag_overlap"],
-            -c["overlap"],
-        )
-    )
-    final_chunks = candidates[:FINAL_CONTEXT_K]
-    print(f"\n{'='*50}")
-    print(f"📌 [DEBUG] Total chunk terpilih untuk LLM: {len(final_chunks)}")
-    print(f"{'='*50}")
-    for chunk_index, chunk in enumerate(final_chunks, 1):
-        normalized_document = " ".join(chunk["document"].split())
-        chunk_preview = normalized_document[:300]
-        if len(normalized_document) > 300:
-            chunk_preview += "..."
-        print(f"   [CHUNK {chunk_index}] {chunk_preview}")
-    print(f"{'='*50}\n")
-    
-    return final_chunks
-
-SYSTEM_PROMPT = config.SYSTEM_PROMPT
-
-FALLBACK_TEXT = config.FALLBACK_TEXT
+    return chunks
 
 
 def build_context(chunks: list[dict]) -> str:
@@ -214,7 +130,7 @@ def build_context(chunks: list[dict]) -> str:
     for c in chunks:
         title = c["metadata"].get("title", "?")
         path = c["metadata"].get("path", "?")
-        parts.append(f"[Note: {title} ({path})]\n{c['document']}")
+        parts.append(f"[Sumber: {title} ({path})]\n{c['document']}")
     return "\n\n---\n\n".join(parts)
 
 
@@ -297,16 +213,14 @@ def ask(question: str, history: ChatHistory | None = None) -> str:
     if is_chitchat(question):
         return answer_chitchat(question, history)
 
-    # Tulis ulang pertanyaan lanjutan jadi mandiri dulu SEBELUM retrieval,
-    # supaya embedding search tetap kena topik yang benar.
     standalone_question = condense_question(question, history)
-
-    chunks = retrieve_with_debug(standalone_question)
+    chunks = retrieve(standalone_question)
 
     if not chunks:
         return FALLBACK_TEXT
 
     return answer_with_context(question, chunks, history)
+
 
 def run_terminal_chat(session_id: str = "terminal") -> None:
     history_store.init_db()
